@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LTU Experimental Biomechanics Lab · MSU Forensic Anthropology Collaborative
+ * LTU Experimental Biomechanics Lab · MSU Forensic Anthropology
  * Interactive Multi-Body Dynamics (MBD) Human Fall & Skeletal Fracture Simulator
  * 
  * app.js - Full Application Orchestrator, Sequential Workflow Controller,
@@ -54,6 +54,10 @@
     playback: {
       isPlaying: false,
       currentFrame: 0,
+      simTime: 0,
+      userScrubbed: false,
+      isSlowMoActive: false,
+      keyframeIndices: [0, 0, 0, 0, 0],
       speed: 1.0,
       lastTimestamp: 0,
       animId: null,
@@ -310,6 +314,10 @@
       badgeEventPeak: document.getElementById('badge-event-peak'),
       badgeEventRest: document.getElementById('badge-event-rest'),
 
+      // Keyframe Filmstrip
+      keyframeFilmstripContainer: document.getElementById('keyframe-filmstrip-container'),
+      keyframeFilmstrip: document.getElementById('keyframe-filmstrip'),
+
       // Simulation HUD
       hudSimTime: document.getElementById('hud-sim-time'),
       hudSimPhase: document.getElementById('hud-sim-phase'),
@@ -549,14 +557,24 @@
     state.simResult = Physics.runSimulation(simParams);
     state.isDirty = false;
 
-    // Reset playback frame index
+    // Reset playback frame index and state
     state.playback.currentFrame = 0;
+    state.playback.simTime = 0;
+    state.playback.userScrubbed = false;
+    state.playback.isSlowMoActive = false;
     if (dom.sliderTimeline) {
       dom.sliderTimeline.max = Math.max(0, state.simResult.frames.length - 1);
       dom.sliderTimeline.value = 0;
     }
+    if (dom.btnPlayPause) {
+      dom.btnPlayPause.innerHTML = '<span>▶</span> Play Simulation';
+      dom.btnPlayPause.classList.add('btn-primary');
+      dom.btnPlayPause.classList.remove('btn-secondary');
+    }
 
     updateTimelineBadges();
+    renderKeyframeFilmstrip();
+    updateKeyframeHighlight();
     updateTelemetryRibbon();
     updateForensicDiagnosisBanner();
     renderSegmentDiagnosticCards();
@@ -692,6 +710,8 @@
       renderSetupPreviewCanvas();
     } else if (mode === 'simulate') {
       renderSimulationCanvas();
+      renderKeyframeFilmstrip();
+      updateKeyframeHighlight();
     } else if (mode === 'analysis') {
       renderInjuryMapCanvas();
       renderSegmentDiagnosticCards();
@@ -1029,7 +1049,7 @@
   // ==========================================================================
   // 7. TAB 2: DYNAMIC MULTI-BODY SIMULATION PLAYBACK & CANVAS RENDERER
   // ==========================================================================
-  function renderSimulationCanvas(isWatermarkMode = false) {
+  function renderSimulationCanvas(isWatermarkMode = false, overrideFrame = null) {
     const canvas = dom.canvasSimulation;
     if (!canvas || !state.simResult) return;
 
@@ -1039,7 +1059,7 @@
     if (!frames || frames.length === 0) return;
 
     const frameIdx = Math.max(0, Math.min(frames.length - 1, state.playback.currentFrame));
-    const curFrame = frames[frameIdx];
+    const curFrame = overrideFrame || frames[frameIdx];
 
     // Background
     ctx.fillStyle = '#0f172a';
@@ -1280,7 +1300,39 @@
       }
     }
 
-    // 8. Video Watermark Header & Footer (When recording WebM video)
+    // 8. Auto Impact Slow-Mo Indicator Badge (Glowing Amber Badge)
+    if (state.playback.isSlowMoActive && state.playback.isPlaying) {
+      ctx.save();
+      const badgeW = 270;
+      const badgeH = 34;
+      const badgeX = (w - badgeW) * 0.5;
+      const badgeY = 20;
+
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+      } else {
+        ctx.rect(badgeX, badgeY, badgeW, badgeH);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⚡ AUTO IMPACT SLOW-MO (0.06×)', w * 0.5, badgeY + badgeH * 0.5);
+      ctx.restore();
+    }
+
+    // 9. Video Watermark Header & Footer (When recording WebM video)
     if (isWatermarkMode) {
       // Header Bar
       ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
@@ -1346,11 +1398,69 @@
     }
   }
 
-  // Playback Animation Loop
+  // Helper: Interpolate simulation frame kinematics for buttery-smooth 60 FPS slow-motion
+  function interpolateFrames(f0, f1, alpha, simTime) {
+    const comX = f0.comX + alpha * (f1.comX - f0.comX);
+    const comY = f0.comY + alpha * (f1.comY - f0.comY);
+    const comVx = f0.comVx + alpha * (f1.comVx - f0.comVx);
+    const comVy = f0.comVy + alpha * (f1.comVy - f0.comVy);
+    const fzTotal = f0.fzTotal + alpha * (f1.fzTotal - f0.fzTotal);
+    const fxTotal = f0.fxTotal + alpha * (f1.fxTotal - f0.fxTotal);
+    const headG = f0.headG + alpha * (f1.headG - f0.headG);
+
+    const nodes = {};
+    if (f0.nodes && f1.nodes) {
+      for (const k in f0.nodes) {
+        const n0 = f0.nodes[k];
+        const n1 = f1.nodes[k];
+        if (n0 && n1) {
+          nodes[k] = {
+            x: n0.x + alpha * (n1.x - n0.x),
+            y: n0.y + alpha * (n1.y - n0.y),
+            vx: n0.vx + alpha * (n1.vx - n0.vx),
+            vy: n0.vy + alpha * (n1.vy - n0.vy)
+          };
+        } else if (n0) {
+          nodes[k] = n0;
+        }
+      }
+    }
+
+    const segInstantFI = {};
+    const fi0 = f0.segInstantFI || {};
+    const fi1 = f1.segInstantFI || {};
+    for (const k in fi0) {
+      const v0 = fi0[k] || 0;
+      const v1 = fi1[k] != null ? fi1[k] : v0;
+      segInstantFI[k] = v0 + alpha * (v1 - v0);
+    }
+
+    return {
+      t: simTime,
+      comX,
+      comY,
+      comVx,
+      comVy,
+      fzTotal,
+      fxTotal,
+      headG,
+      nodes,
+      segInstantFI
+    };
+  }
+
+  // Playback Animation Loop with Time-Based Tracking & Smooth Auto Slow-Mo
   function playSimulation() {
     if (state.playback.isPlaying) return;
+    const sim = state.simResult;
+    if (!sim || !sim.frames || sim.frames.length === 0) return;
+
     state.playback.isPlaying = true;
     state.playback.lastTimestamp = performance.now();
+    
+    // Continuous simulation clock (in seconds)
+    const curF = sim.frames[state.playback.currentFrame];
+    state.playback.simTime = curF ? curF.t : 0;
 
     if (dom.btnPlayPause) {
       dom.btnPlayPause.innerHTML = '<span>⏸</span> Pause';
@@ -1361,36 +1471,72 @@
     function animLoop(timestamp) {
       if (!state.playback.isPlaying) return;
 
-      const deltaMs = timestamp - state.playback.lastTimestamp;
+      const deltaMs = Math.min(100, timestamp - state.playback.lastTimestamp);
       state.playback.lastTimestamp = timestamp;
 
       const sim = state.simResult;
       if (!sim || !sim.frames || sim.frames.length === 0) return;
 
       let speedFactor = state.playback.speed;
-      const curFrame = sim.frames[state.playback.currentFrame];
+      let isSlowMo = false;
 
-      // Auto slow-motion at impact
-      if (dom.chkSlowmoImpact && dom.chkSlowmoImpact.checked && curFrame) {
-        if (curFrame.t >= sim.summary.flightTimeS && curFrame.t <= sim.summary.flightTimeS + 0.08) {
-          speedFactor = Math.min(speedFactor, 0.15);
+      // Auto slow-motion at ground impact & joint deceleration window
+      const impactStart = sim.summary.flightTimeS - 0.025;
+      const impactEnd = sim.summary.flightTimeS + 0.22;
+      if (dom.chkSlowmoImpact && dom.chkSlowmoImpact.checked) {
+        if (state.playback.simTime >= impactStart && state.playback.simTime <= impactEnd) {
+          speedFactor = Math.min(speedFactor, 0.06);
+          isSlowMo = true;
+        }
+      }
+      state.playback.isSlowMoActive = isSlowMo;
+
+      // Continuous time advance
+      state.playback.simTime += (deltaMs / 1000) * speedFactor;
+
+      const frames = sim.frames;
+      const lastF = frames[frames.length - 1];
+
+      // End-of-simulation check
+      if (state.playback.simTime >= lastF.t) {
+        state.playback.simTime = lastF.t;
+        state.playback.currentFrame = frames.length - 1;
+        state.playback.userScrubbed = false;
+        if (dom.sliderTimeline) dom.sliderTimeline.value = frames.length - 1;
+        renderSimulationCanvas();
+        updateKeyframeHighlight();
+        pauseSimulation(true);
+        return;
+      }
+
+      // Linear search for bounding frame indices around current frame
+      let idx = state.playback.currentFrame;
+      if (idx < 0 || idx >= frames.length) idx = 0;
+
+      while (idx < frames.length - 1 && frames[idx + 1].t <= state.playback.simTime) {
+        idx++;
+      }
+      while (idx > 0 && frames[idx].t > state.playback.simTime) {
+        idx--;
+      }
+
+      state.playback.currentFrame = idx;
+      if (dom.sliderTimeline) dom.sliderTimeline.value = idx;
+
+      // Sub-frame interpolation for 60 FPS fluid rendering during 0.06x slow-mo
+      let renderFrame = frames[idx];
+      if (idx < frames.length - 1) {
+        const f0 = frames[idx];
+        const f1 = frames[idx + 1];
+        const span = f1.t - f0.t;
+        if (span > 1e-6) {
+          const alpha = Math.max(0, Math.min(1, (state.playback.simTime - f0.t) / span));
+          renderFrame = interpolateFrames(f0, f1, alpha, state.playback.simTime);
         }
       }
 
-      // Advance frames according to time delta
-      const framesToAdvance = Math.max(1, Math.round((deltaMs / 1000) * 120 * speedFactor));
-      state.playback.currentFrame += framesToAdvance;
-
-      if (state.playback.currentFrame >= sim.frames.length) {
-        state.playback.currentFrame = sim.frames.length - 1;
-        pauseSimulation();
-      }
-
-      if (dom.sliderTimeline) {
-        dom.sliderTimeline.value = state.playback.currentFrame;
-      }
-
-      renderSimulationCanvas();
+      renderSimulationCanvas(false, renderFrame);
+      updateKeyframeHighlight();
 
       if (state.playback.isPlaying) {
         state.playback.animId = requestAnimationFrame(animLoop);
@@ -1400,14 +1546,20 @@
     state.playback.animId = requestAnimationFrame(animLoop);
   }
 
-  function pauseSimulation() {
+  function pauseSimulation(isEnd = false) {
     state.playback.isPlaying = false;
+    state.playback.isSlowMoActive = false;
     if (state.playback.animId) {
       cancelAnimationFrame(state.playback.animId);
       state.playback.animId = null;
     }
     if (dom.btnPlayPause) {
-      dom.btnPlayPause.innerHTML = '<span>▶</span> Play Simulation';
+      const atEnd = isEnd || (state.simResult && state.playback.currentFrame >= state.simResult.frames.length - 1);
+      if (atEnd) {
+        dom.btnPlayPause.innerHTML = '<span>▶</span> Replay Simulation';
+      } else {
+        dom.btnPlayPause.innerHTML = '<span>▶</span> Play Simulation';
+      }
       dom.btnPlayPause.classList.add('btn-primary');
       dom.btnPlayPause.classList.remove('btn-secondary');
     }
@@ -1416,8 +1568,16 @@
   function restartSimulation() {
     pauseSimulation();
     state.playback.currentFrame = 0;
+    state.playback.simTime = 0;
+    state.playback.userScrubbed = false;
     if (dom.sliderTimeline) dom.sliderTimeline.value = 0;
+    if (dom.btnPlayPause) {
+      dom.btnPlayPause.innerHTML = '<span>▶</span> Play Simulation';
+      dom.btnPlayPause.classList.add('btn-primary');
+      dom.btnPlayPause.classList.remove('btn-secondary');
+    }
     renderSimulationCanvas();
+    updateKeyframeHighlight();
   }
 
   function stepFrame(delta) {
@@ -1425,8 +1585,366 @@
     if (!state.simResult || !state.simResult.frames) return;
     const maxF = state.simResult.frames.length - 1;
     state.playback.currentFrame = Math.max(0, Math.min(maxF, state.playback.currentFrame + delta));
+    state.playback.simTime = state.simResult.frames[state.playback.currentFrame].t;
+    state.playback.userScrubbed = true;
     if (dom.sliderTimeline) dom.sliderTimeline.value = state.playback.currentFrame;
     renderSimulationCanvas();
+    updateKeyframeHighlight();
+  }
+
+  // Handle Play/Pause button click with intuitive auto-reset to t=0
+  function handlePlayPauseClick() {
+    if (state.playback.isPlaying) {
+      pauseSimulation();
+    } else {
+      const sim = state.simResult;
+      if (!sim || !sim.frames || sim.frames.length === 0) return;
+
+      const atEnd = state.playback.currentFrame >= sim.frames.length - 1;
+      const repressing = !state.playback.userScrubbed && state.playback.currentFrame > 0;
+
+      if (atEnd || repressing) {
+        state.playback.currentFrame = 0;
+        state.playback.simTime = 0;
+        state.playback.userScrubbed = false;
+        if (dom.sliderTimeline) dom.sliderTimeline.value = 0;
+      } else {
+        state.playback.simTime = sim.frames[state.playback.currentFrame].t;
+      }
+
+      playSimulation();
+    }
+  }
+
+  // ==========================================================================
+  // 7b. PHASE KEYFRAME FILMSTRIP RENDERER & INTERACTION CONTROLLER
+  // ==========================================================================
+  function renderMiniKeyframeCanvas(canvas, curFrame, phaseIdx) {
+    if (!canvas || !curFrame) return;
+
+    const { ctx, w, h } = setupHiDPICanvas(canvas);
+    const p = state.params;
+
+    // Dark background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, w, h);
+
+    const nds = curFrame.nodes || {};
+    const nodeKeys = Object.keys(nds);
+    if (nodeKeys.length === 0) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodeKeys.forEach(k => {
+      const n = nds[k];
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    });
+
+    const bodyW = Math.max(1.0, maxX - minX);
+    const bodyH = Math.max(1.2, maxY - minY);
+    const bodyCenterX = (minX + maxX) * 0.5;
+    const bodyCenterY = (minY + maxY) * 0.5;
+
+    const nearGround = curFrame.comY < 1.2;
+    let focusY = bodyCenterY;
+    let viewH = bodyH + 0.45;
+    if (nearGround) {
+      focusY = Math.max(0.4, bodyCenterY);
+      viewH = Math.max(1.6, maxY + 0.3);
+    }
+
+    const scale = Math.min((w - 24) / Math.max(1.4, bodyW + 0.5), (h - 20) / viewH);
+    const centerX = w * 0.5;
+    const centerY = nearGround ? (h * 0.78 - focusY * scale) : (h * 0.5);
+
+    function toMiniScreen(x, y) {
+      return {
+        sx: centerX + (x - bodyCenterX) * scale,
+        sy: nearGround ? (h * 0.78 - y * scale) : (centerY - (y - focusY) * scale)
+      };
+    }
+
+    // Ground Substrate Layer
+    if (nearGround || curFrame.comY < 2.0) {
+      const gPt = toMiniScreen(0, 0);
+      if (gPt.sy < h + 20) {
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, gPt.sy, w, Math.max(0, h - gPt.sy));
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, gPt.sy);
+        ctx.lineTo(w, gPt.sy);
+        ctx.stroke();
+      }
+    }
+
+    // Launch Ledge for Phase 0
+    if (phaseIdx === 0 && p.height > 0.5) {
+      const ledgePt = toMiniScreen(0, p.height);
+      ctx.fillStyle = '#334155';
+      const ledgeRight = toMiniScreen(curFrame.comX - 0.2, p.height).sx;
+      ctx.fillRect(0, ledgePt.sy, Math.max(20, ledgeRight), h - ledgePt.sy);
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, ledgePt.sy);
+      ctx.lineTo(Math.max(20, ledgeRight), ledgePt.sy);
+      ctx.lineTo(Math.max(20, ledgeRight), h);
+      ctx.stroke();
+    }
+
+    // Bone Colors based on stress / FI
+    const fi = curFrame.segInstantFI || {};
+    function getSegColor(segId) {
+      const val = fi[segId] != null ? fi[segId] : 0;
+      if (val >= 1.0) return '#ef4444'; // fracture red
+      if (val >= 0.65) return '#f59e0b'; // micro amber
+      return '#10b981'; // safe green
+    }
+
+    function drawMiniBone(n1Key, n2Key, segId, width) {
+      if (!nds[n1Key] || !nds[n2Key]) return;
+      const p1 = toMiniScreen(nds[n1Key].x, nds[n1Key].y);
+      const p2 = toMiniScreen(nds[n2Key].x, nds[n2Key].y);
+
+      ctx.strokeStyle = getSegColor(segId);
+      ctx.lineWidth = Math.max(2, width * 0.45);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p1.sx, p1.sy);
+      ctx.lineTo(p2.sx, p2.sy);
+      ctx.stroke();
+    }
+
+    // Torso & Spine
+    drawMiniBone('headCenter', 'neckBase', 'neck', 6);
+    drawMiniBone('neckBase', 'midThorax', 'thorax', 10);
+    drawMiniBone('midThorax', 'hipPelvis', 'lumbarPelvis', 11);
+
+    // Lower Limbs
+    drawMiniBone('hipPelvis', 'knee', 'thigh', 9);
+    drawMiniBone('knee', 'ankle', 'shank', 7);
+    drawMiniBone('ankle', 'footTip', 'foot', 6);
+
+    // Upper Limbs
+    drawMiniBone('neckBase', 'elbow', 'upperArm', 6);
+    drawMiniBone('elbow', 'wrist', 'forearmHand', 5);
+
+    // Head
+    if (nds.headCenter) {
+      const spHead = toMiniScreen(nds.headCenter.x, nds.headCenter.y);
+      const headColor = getSegColor('head');
+      const headR = Math.max(3.5, 0.08 * scale);
+
+      ctx.fillStyle = headColor;
+      ctx.beginPath();
+      ctx.arc(spHead.sx, spHead.sy, headR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Joint Nodes
+    ctx.fillStyle = '#ffffff';
+    nodeKeys.forEach(k => {
+      const sp = toMiniScreen(nds[k].x, nds[k].y);
+      ctx.beginPath();
+      ctx.arc(sp.sx, sp.sy, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // GRF Vector Arrow
+    if (curFrame.fzTotal > 0.1) {
+      let minYContact = Infinity;
+      let contactX = curFrame.comX;
+      nodeKeys.forEach(k => {
+        if (nds[k].y < minYContact) {
+          minYContact = nds[k].y;
+          contactX = nds[k].x;
+        }
+      });
+      const spContact = toMiniScreen(contactX, Math.max(0, minYContact));
+      const arrowLen = Math.min(36, Math.max(14, curFrame.fzTotal * 1.2));
+
+      ctx.strokeStyle = '#e11d48';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(spContact.sx, spContact.sy);
+      ctx.lineTo(spContact.sx, spContact.sy - arrowLen);
+      ctx.stroke();
+
+      ctx.fillStyle = '#e11d48';
+      ctx.beginPath();
+      ctx.moveTo(spContact.sx, spContact.sy - arrowLen);
+      ctx.lineTo(spContact.sx - 4, spContact.sy - arrowLen + 6);
+      ctx.lineTo(spContact.sx + 4, spContact.sy - arrowLen + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // CoM Dot & Velocity Vector
+    const spCom = toMiniScreen(curFrame.comX, curFrame.comY);
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(spCom.sx, spCom.sy, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    const vMag = Math.hypot(curFrame.comVx, curFrame.comVy);
+    if (vMag > 0.1 && curFrame.fzTotal <= 0.1) {
+      const vLen = Math.min(22, vMag * 1.5);
+      const vAng = Math.atan2(curFrame.comVy, curFrame.comVx);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(spCom.sx, spCom.sy);
+      ctx.lineTo(spCom.sx + vLen * Math.cos(vAng), spCom.sy - vLen * Math.sin(vAng));
+      ctx.stroke();
+    }
+  }
+
+  function renderKeyframeFilmstrip() {
+    const sim = state.simResult;
+    if (!sim || !sim.frames || sim.frames.length === 0) return;
+
+    const frames = sim.frames;
+    const tFlight = sim.summary.flightTimeS;
+
+    // 1. Calculate keyframe indices
+    const idx0 = 0;
+
+    let idx1 = 0;
+    const tMid = tFlight * 0.5;
+    let minDiff1 = Infinity;
+    for (let i = 0; i < frames.length; i++) {
+      const diff = Math.abs(frames[i].t - tMid);
+      if (diff < minDiff1) {
+        minDiff1 = diff;
+        idx1 = i;
+      }
+    }
+
+    let idx2 = 0;
+    let minDiff2 = Infinity;
+    for (let i = 0; i < frames.length; i++) {
+      const diff = Math.abs(frames[i].t - tFlight);
+      if (diff < minDiff2) {
+        minDiff2 = diff;
+        idx2 = i;
+      }
+    }
+
+    let idx3 = idx2;
+    let maxFz = -1;
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].fzTotal > maxFz) {
+        maxFz = frames[i].fzTotal;
+        idx3 = i;
+      }
+    }
+
+    const idx4 = frames.length - 1;
+
+    state.playback.keyframeIndices = [idx0, idx1, idx2, idx3, idx4];
+
+    // 2. Render each keyframe card
+    for (let k = 0; k < 5; k++) {
+      const frameIdx = state.playback.keyframeIndices[k];
+      const f = frames[frameIdx];
+      if (!f) continue;
+
+      // Update text readouts
+      const timeEl = document.getElementById(`kf-time-${k}`);
+      if (timeEl) timeEl.textContent = `t = ${f.t.toFixed(3)} s`;
+
+      const metricEl = document.getElementById(`kf-metrics-${k}`);
+      if (metricEl) {
+        const vMag = Math.hypot(f.comVx, f.comVy).toFixed(1);
+        if (f.fzTotal > 0.1) {
+          metricEl.textContent = `v = ${vMag} m/s · GRF = ${f.fzTotal.toFixed(1)} kN`;
+        } else {
+          metricEl.textContent = `v = ${vMag} m/s · Alt = ${Math.max(0, f.comY).toFixed(2)} m`;
+        }
+      }
+
+      // Render mini-canvas
+      const canvas = document.getElementById(`canvas-kf-${k}`);
+      if (canvas) {
+        renderMiniKeyframeCanvas(canvas, f, k);
+      }
+    }
+  }
+
+  function updateKeyframeHighlight() {
+    const sim = state.simResult;
+    if (!sim || !sim.frames || !state.playback.keyframeIndices) return;
+
+    const curFrame = sim.frames[state.playback.currentFrame];
+    if (!curFrame) return;
+
+    const t = curFrame.t;
+    const tFlight = sim.summary.flightTimeS;
+    const kf = state.playback.keyframeIndices;
+    const t0 = sim.frames[kf[0]]?.t || 0;
+    const t1 = sim.frames[kf[1]]?.t || (tFlight * 0.5);
+    const t2 = sim.frames[kf[2]]?.t || tFlight;
+    const t3 = sim.frames[kf[3]]?.t || (tFlight + 0.03);
+    const t4 = sim.frames[kf[4]]?.t || (tFlight + 0.35);
+
+    let activeIdx = 0;
+    if (t < (t0 + t1) * 0.5) {
+      activeIdx = 0;
+    } else if (t < (t1 + t2) * 0.5) {
+      activeIdx = 1;
+    } else if (t < (t2 + t3) * 0.5) {
+      activeIdx = 2;
+    } else if (t < (t3 + t4) * 0.5) {
+      activeIdx = 3;
+    } else {
+      activeIdx = 4;
+    }
+
+    const cards = document.querySelectorAll('.keyframe-card');
+    cards.forEach((card, idx) => {
+      if (idx === activeIdx) {
+        card.classList.add('active-phase');
+      } else {
+        card.classList.remove('active-phase');
+      }
+    });
+  }
+
+  function initKeyframeFilmstripEvents() {
+    const cards = document.querySelectorAll('.keyframe-card');
+    cards.forEach(card => {
+      card.addEventListener('click', () => {
+        const kfIdx = parseInt(card.dataset.keyframeIdx, 10);
+        if (isNaN(kfIdx) || !state.playback.keyframeIndices) return;
+
+        const targetFrameIdx = state.playback.keyframeIndices[kfIdx];
+        const sim = state.simResult;
+        if (!sim || !sim.frames || !sim.frames[targetFrameIdx]) return;
+
+        pauseSimulation();
+        state.playback.userScrubbed = true;
+        state.playback.currentFrame = targetFrameIdx;
+        state.playback.simTime = sim.frames[targetFrameIdx].t;
+
+        if (dom.sliderTimeline) {
+          dom.sliderTimeline.value = targetFrameIdx;
+        }
+
+        renderSimulationCanvas();
+        updateKeyframeHighlight();
+      });
+
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          card.click();
+        }
+      });
+    });
   }
 
   // ==========================================================================
@@ -2287,7 +2805,7 @@
     const sum = sim.summary;
 
     let csv = '# ============================================================================\n';
-    csv += '# LTU EXPERIMENTAL BIOMECHANICS LAB · MSU FORENSIC ANTHROPOLOGY COLLABORATIVE\n';
+    csv += '# LTU EXPERIMENTAL BIOMECHANICS LAB · MSU FORENSIC ANTHROPOLOGY\n';
     csv += '# Interactive Multi-Body Dynamics Human Fall & Skeletal Fracture Simulator\n';
     csv += '# High-Resolution Kinematic, Kinetic & Forensic Trauma Time-Series Data Export\n';
     csv += '# ============================================================================\n';
@@ -2579,10 +3097,7 @@
 
     // 5. Tab 2 Simulation Controls
     if (dom.btnPlayPause) {
-      dom.btnPlayPause.addEventListener('click', () => {
-        if (state.playback.isPlaying) pauseSimulation();
-        else playSimulation();
-      });
+      dom.btnPlayPause.addEventListener('click', handlePlayPauseClick);
     }
 
     if (dom.btnSimRestart) {
@@ -2646,10 +3161,18 @@
     if (dom.sliderTimeline) {
       dom.sliderTimeline.addEventListener('input', () => {
         pauseSimulation();
+        state.playback.userScrubbed = true;
         state.playback.currentFrame = parseInt(dom.sliderTimeline.value, 10) || 0;
+        if (state.simResult && state.simResult.frames[state.playback.currentFrame]) {
+          state.playback.simTime = state.simResult.frames[state.playback.currentFrame].t;
+        }
         renderSimulationCanvas();
+        updateKeyframeHighlight();
       });
     }
+
+    // Keyframe filmstrip card click and keyboard events
+    initKeyframeFilmstripEvents();
 
     // Overlay checkboxes
     [dom.chkShowCom, dom.chkShowGrf, dom.chkShowTrajectory, dom.chkShowStressColors].forEach(chk => {

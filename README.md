@@ -1,6 +1,7 @@
 ﻿# Interactive Multi-Body Dynamics (MBD) Human Fall, Impact Kinetics & Skeletal Fracture Simulator
 
-**LTU Experimental Biomechanics Laboratory (EBL) · MSU Forensic Anthropology Collaborative**  
+**LTU Experimental Biomechanics Laboratory (EBL) · MSU Forensic Anthropology**  
+**LTU EBL Main Portal:** [https://ltuebl.github.io/](https://ltuebl.github.io/)  
 **Live Interactive Simulator:** [https://ltuebl.github.io/FallBiomechanicsSimulator/](https://ltuebl.github.io/FallBiomechanicsSimulator/)
 
 ## Overview

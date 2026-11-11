@@ -3,8 +3,9 @@
  * LTU Experimental Biomechanics Lab · MSU Forensic Anthropology Collaborative
  * Interactive Multi-Body Dynamics (MBD) Human Fall & Skeletal Fracture Simulator
  * 
- * physics.js - Core Multi-Body Physics, Anthropometrics, Viscoelastic Contact,
- *              Internal Axial Conduction & Forensic Fracture Tolerance Engine
+ * physics.js - Core Multi-Body Physics, Articulated Kinematics, Biofidelic RoM,
+ *              Viscoelastic Ground Contact Mechanics, Internal Axial Conduction
+ *              & Forensic Skeletal Fracture Tolerance Engine
  * 
  * Global Namespace: window.EBLFallPhysics
  * ============================================================================
@@ -344,20 +345,138 @@
   }
 
   // ==========================================================================
-  // 5. INTERNAL BIOMECHANICAL MODEL & JOINT LINKAGE
+  // 5. ARTICULATED KINEMATIC TREE & BIOFIDELIC RANGE OF MOTION (RoM)
   // ==========================================================================
 
   /**
-   * Configures the 10 anatomical nodes in local anatomical coordinate space:
-   *   headTop, headCenter, neckBase, midThorax, hipPelvis,
-   *   knee, ankle, footTip, elbow, wrist
+   * Anatomical Range of Motion (RoM) Limits in Radians:
+   *   Strict physiological boundaries to prevent joint dislocation / inversion
+   */
+  const ROM_LIMITS = {
+    lumbar:   { min: -20 * Math.PI / 180, max:  60 * Math.PI / 180 }, // [-0.349, +1.047] rad (+ = flexion)
+    neck:     { min: -35 * Math.PI / 180, max:  45 * Math.PI / 180 }, // [-0.611, +0.785] rad (+ = chin-to-chest)
+    hip:      { min: -20 * Math.PI / 180, max: 115 * Math.PI / 180 }, // [-0.349, +2.007] rad (+ = thigh elevation)
+    knee:     { min:   0 * Math.PI / 180, max: 130 * Math.PI / 180 }, // [ 0.000, +2.269] rad (q.knee >= 0: NEVER hyperextends forward!)
+    ankle:    { min: -40 * Math.PI / 180, max:  28 * Math.PI / 180 }, // [-0.698, +0.489] rad (- = plantarflexion, + = dorsiflexion)
+    shoulder: { min: -45 * Math.PI / 180, max: 150 * Math.PI / 180 }, // [-0.785, +2.618] rad (+ = forward elevation)
+    elbow:    { min:   0 * Math.PI / 180, max: 135 * Math.PI / 180 }  // [ 0.000, +2.356] rad (q.elbow >= 0: NEVER hyperextends backward!)
+  };
+
+  /**
+   * Strictly clamps relative joint angles to physiological RoM boundaries
+   */
+  function clampJointAngles(q) {
+    const clamped = {};
+    for (const k of Object.keys(ROM_LIMITS)) {
+      const val = (q && q[k] != null) ? q[k] : 0;
+      clamped[k] = Math.max(ROM_LIMITS[k].min, Math.min(ROM_LIMITS[k].max, val));
+    }
+    return clamped;
+  }
+
+  /**
+   * 1. Hierarchical Forward Kinematics:
+   *    Computes exact (x, y) coordinates for all 10 anatomical nodes from:
+   *    - Root hipPelvis coordinates (hipX, hipY)
+   *    - Global trunk/pelvis tilt angle (pelvisTheta: 0 = upright vertical, + = forward lean toward +x)
+   *    - Relative physiological joint flexion/extension angles (q)
+   *    - Anthropometric segment lengths (H = stature)
+   */
+  function computePoseFromAngles(hipX, hipY, pelvisTheta, jointAngles, anthro) {
+    const H = (anthro && anthro.stature) || 1.75;
+    const q = clampJointAngles(jointAngles);
+
+    // Lumbar Spine: RoM [-20 deg, +60 deg]
+    // thoraxAngle = pelvisTheta + q.lumbar
+    // midThorax is L_lumbar (0.145 * H) from hipPelvis along pelvisTheta + 0.5 * q.lumbar
+    const lumbarAngle = pelvisTheta + 0.5 * q.lumbar;
+    const L_lumbar = 0.145 * H;
+    const midThoraxX = hipX + L_lumbar * Math.sin(lumbarAngle);
+    const midThoraxY = hipY + L_lumbar * Math.cos(lumbarAngle);
+
+    // neckBase is L_thorax (0.170 * H) from midThorax along thoraxAngle
+    const thoraxAngle = pelvisTheta + q.lumbar;
+    const L_thorax = 0.170 * H;
+    const neckBaseX = midThoraxX + L_thorax * Math.sin(thoraxAngle);
+    const neckBaseY = midThoraxY + L_thorax * Math.cos(thoraxAngle);
+
+    // Cervical Spine: RoM [-35 deg, +45 deg]
+    // neckAngle = thoraxAngle + q.neck
+    // headCenter is (0.052 + 0.065) * H from neckBase along neckAngle
+    const neckAngle = thoraxAngle + q.neck;
+    const L_neck = (0.052 + 0.065) * H;
+    const headCenterX = neckBaseX + L_neck * Math.sin(neckAngle);
+    const headCenterY = neckBaseY + L_neck * Math.cos(neckAngle);
+
+    // headTop is 0.065 * H from headCenter along neckAngle
+    const L_headTop = 0.065 * H;
+    const headTopX = headCenterX + L_headTop * Math.sin(neckAngle);
+    const headTopY = headCenterY + L_headTop * Math.cos(neckAngle);
+
+    // Hip Joint: RoM [-20 deg, +115 deg]
+    // thighAngle = pelvisTheta + Math.PI - q.hip
+    // knee is L_thigh (0.245 * H) from hipPelvis along thighAngle
+    const thighAngle = pelvisTheta + Math.PI - q.hip;
+    const L_thigh = 0.245 * H;
+    const kneeX = hipX + L_thigh * Math.sin(thighAngle);
+    const kneeY = hipY + L_thigh * Math.cos(thighAngle);
+
+    // Knee Joint: RoM [0 deg, +130 deg]
+    // shankAngle = thighAngle + q.knee (knee can NEVER hyperextend forward)
+    // ankle is L_shank (0.246 * H) from knee along shankAngle
+    const shankAngle = thighAngle + q.knee;
+    const L_shank = 0.246 * H;
+    const ankleX = kneeX + L_shank * Math.sin(shankAngle);
+    const ankleY = kneeY + L_shank * Math.cos(shankAngle);
+
+    // Ankle Joint: RoM [-40 deg, +28 deg]
+    // footAngle = shankAngle - Math.PI / 2 - q.ankle
+    // footTip is 0.11 * H from ankle along footAngle
+    const footAngle = shankAngle - Math.PI / 2 - q.ankle;
+    const L_foot = 0.11 * H;
+    const footTipX = ankleX + L_foot * Math.sin(footAngle);
+    const footTipY = ankleY + L_foot * Math.cos(footAngle);
+
+    // Shoulder Joint: RoM [-45 deg, +150 deg]
+    // upperArmAngle = thoraxAngle + Math.PI - q.shoulder
+    // elbow is L_upperArm (0.186 * H) from neckBase along upperArmAngle
+    const upperArmAngle = thoraxAngle + Math.PI - q.shoulder;
+    const L_upperArm = 0.186 * H;
+    const elbowX = neckBaseX + L_upperArm * Math.sin(upperArmAngle);
+    const elbowY = neckBaseY + L_upperArm * Math.cos(upperArmAngle);
+
+    // Elbow Joint: RoM [0 deg, +135 deg]
+    // forearmAngle = upperArmAngle - q.elbow (elbow can NEVER hyperextend backward)
+    // wrist is L_forearm (0.190 * H) from elbow along forearmAngle
+    const forearmAngle = upperArmAngle - q.elbow;
+    const L_forearm = 0.190 * H;
+    const wristX = elbowX + L_forearm * Math.sin(forearmAngle);
+    const wristY = elbowY + L_forearm * Math.cos(forearmAngle);
+
+    const nodes = {
+      hipPelvis:  { x: hipX, y: hipY },
+      midThorax:  { x: midThoraxX, y: midThoraxY },
+      neckBase:   { x: neckBaseX, y: neckBaseY },
+      headCenter: { x: headCenterX, y: headCenterY },
+      headTop:    { x: headTopX, y: headTopY },
+      knee:       { x: kneeX, y: kneeY },
+      ankle:      { x: ankleX, y: ankleY },
+      footTip:    { x: footTipX, y: footTipY },
+      elbow:      { x: elbowX, y: elbowY },
+      wrist:      { x: wristX, y: wristY }
+    };
+
+    return { nodes, q };
+  }
+
+  /**
+   * Internal model construction helper preserved for backwards compatibility
    */
   function buildAnatomicalModel(anthro, bracing, initialAngleDeg) {
     const H = anthro.stature;
     const B = Math.max(0, Math.min(1, Number(bracing) != null ? Number(bracing) : 0.5));
     const pitch = Number(initialAngleDeg) || 0;
 
-    // Contact radii (meters)
     const radii = {
       headTop: 0.09,
       headCenter: 0.10,
@@ -371,11 +490,9 @@
       wrist: 0.05
     };
 
-    // Lumped nodal masses (kg)
     const sm = {};
-    for (const s of anthro.segmentsList) {
-      sm[s.id] = s.mass;
-    }
+    for (const s of anthro.segmentsList) sm[s.id] = s.mass;
+
     const nodeMasses = {
       headTop: 0.40 * sm.head,
       headCenter: 0.60 * sm.head + 0.50 * sm.neck,
@@ -389,40 +506,30 @@
       wrist: 0.50 * sm.forearmHand
     };
 
-    // Local coordinates along sagittal plane (origin at heel sole)
-    const loc = {};
-    loc.ankle = { x: 0.0, y: 0.065 * H };
-    loc.footTip = { x: 0.13 * H, y: 0.035 * H };
-    loc.knee = { x: 0.008 * H, y: loc.ankle.y + 0.246 * H };
-    loc.hipPelvis = { x: -0.008 * H, y: loc.knee.y + 0.245 * H };
-    loc.midThorax = { x: -0.005 * H, y: loc.hipPelvis.y + 0.145 * H };
-    loc.neckBase = { x: 0.0, y: loc.midThorax.y + 0.170 * H };
-    loc.headCenter = { x: 0.0, y: loc.neckBase.y + 0.052 * H + 0.065 * H };
-    loc.headTop = { x: 0.0, y: loc.neckBase.y + 0.052 * H + 0.130 * H };
-
-    // Upper extremity posture based on neuromuscular bracing & fall pitch
+    const q = {
+      lumbar: 0,
+      neck: 0,
+      hip: 0.04,
+      knee: 0.06,
+      ankle: 0.0,
+      shoulder: 0.05,
+      elbow: 0.15
+    };
     if (pitch > 15) {
-      // Forward fall: active extension of arms (FOOSH posture)
-      loc.elbow = { x: 0.18 * H * B + 0.04 * H, y: loc.neckBase.y - 0.05 * H };
-      loc.wrist = { x: 0.36 * H * B + 0.06 * H, y: loc.neckBase.y - 0.08 * H };
+      q.shoulder = Math.min(1.4, 0.4 + 0.8 * B);
+      q.elbow = Math.min(1.1, 0.15 + 0.4 * B);
     } else if (pitch < -15) {
-      // Backward fall: arms reach posterior/inferior to break fall
-      loc.elbow = { x: -0.10 * H * B - 0.02 * H, y: loc.neckBase.y - 0.12 * H };
-      loc.wrist = { x: -0.22 * H * B - 0.03 * H, y: loc.neckBase.y - 0.18 * H };
-    } else {
-      // Neutral upright posture
-      loc.elbow = { x: 0.02 * H, y: loc.neckBase.y - 0.186 * H };
-      loc.wrist = { x: 0.03 * H, y: loc.elbow.y - 0.190 * H };
+      q.shoulder = Math.max(-0.6, -0.2 - 0.4 * B);
+      q.elbow = Math.min(0.8, 0.25 * B);
     }
 
-    // Compute Center of Mass (CoM) in local coordinates
-    let totM = 0;
-    let cx = 0, cy = 0;
+    const pose = computePoseFromAngles(0, 0, (pitch * Math.PI) / 180.0, q, anthro);
+    let totM = 0, cx = 0, cy = 0;
     for (const k of Object.keys(nodeMasses)) {
       const m = nodeMasses[k];
       totM += m;
-      cx += m * loc[k].x;
-      cy += m * loc[k].y;
+      cx += m * pose.nodes[k].x;
+      cy += m * pose.nodes[k].y;
     }
     cx /= totM;
     cy /= totM;
@@ -430,16 +537,10 @@
     return {
       radii,
       nodeMasses,
-      loc,
+      loc: pose.nodes,
       localCoM: { x: cx, y: cy },
       totalMass: totM
     };
-  }
-
-  function dist2(p1, p2) {
-    const dx = p1.x - p2.x;
-    const dy = p1.y - p2.y;
-    return Math.sqrt(dx * dx + dy * dy);
   }
 
   /**
@@ -471,7 +572,7 @@
   }
 
   // ==========================================================================
-  // 6. 2000 Hz ARTICULATED MULTI-BODY SOLVER (runSimulation)
+  // 6. 2000 Hz ARTICULATED BIOFIDELIC MULTI-BODY SOLVER (runSimulation)
   // ==========================================================================
   const defaultParams = {
     height: 3.5,
@@ -489,11 +590,12 @@
   };
 
   /**
-   * Runs the complete multi-body dynamics simulation:
-   *   - Free-fall ballistic trajectory with orientation tracking
-   *   - 2000 Hz sub-stepped Hunt-Crossley contact mechanics
-   *   - Internal skeletal load transmission & axial conduction
-   *   - HIC15 and forensic tolerance failure evaluation
+   * Runs the complete articulated multi-body fall dynamics simulation:
+   *   - Ballistic flight trajectory with free-fall orientation tracking
+   *   - 2000 Hz sub-stepped Hunt-Crossley viscoplastic contact mechanics
+   *   - Articulated kinematic tree with biofidelic RoM-clamped joint angles
+   *   - Dynamic skeletal axial wave conduction & forensic tolerance evaluation
+   *   - 5 keyframe snapshots export across critical fall phases
    */
   function runSimulation(params) {
     const p = Object.assign({}, defaultParams, params);
@@ -510,48 +612,111 @@
     }
 
     const anthro = computeAnthropometrics(p.mass, p.stature, p.tolerance);
-    const model = buildAnatomicalModel(anthro, p.bracing, p.angleDeg);
+    const H = anthro.stature;
+    const B = Math.max(0, Math.min(1, Number(p.bracing) != null ? Number(p.bracing) : 0.5));
 
-    const theta0 = (p.angleDeg * Math.PI) / 180.0;
-    const cos0 = Math.cos(theta0);
-    const sin0 = Math.sin(theta0);
-    const omega0 = (p.omegaDeg * Math.PI) / 180.0;
+    // Contact radii for all 10 anatomical nodes (meters)
+    const radii = {
+      headTop: 0.09,
+      headCenter: 0.10,
+      neckBase: 0.08,
+      midThorax: 0.12,
+      hipPelvis: 0.11,
+      knee: 0.07,
+      ankle: 0.06,
+      footTip: 0.04,
+      elbow: 0.05,
+      wrist: 0.05
+    };
 
-    const nodeKeys = Object.keys(model.loc);
-    const relNodes = {};
-    let minRelY = Infinity;
+    // Lumped nodal masses (kg)
+    const sm = {};
+    for (const s of anthro.segmentsList) sm[s.id] = s.mass;
 
-    for (const k of nodeKeys) {
-      const dx = model.loc[k].x - model.localCoM.x;
-      const dy = model.loc[k].y - model.localCoM.y;
-      const rx = dx * cos0 - dy * sin0;
-      const ry = dx * sin0 + dy * cos0;
-      relNodes[k] = { dx, dy, rx, ry };
-      const bot = ry - model.radii[k];
-      if (bot < minRelY) minRelY = bot;
+    const nodeMasses = {
+      headTop: 0.40 * sm.head,
+      headCenter: 0.60 * sm.head + 0.50 * sm.neck,
+      neckBase: 0.50 * sm.neck + 0.50 * sm.thorax + 0.50 * sm.upperArm,
+      midThorax: 0.50 * sm.thorax + 0.50 * sm.lumbarPelvis,
+      hipPelvis: 0.50 * sm.lumbarPelvis + 0.50 * sm.thigh,
+      knee: 0.50 * sm.thigh + 0.50 * sm.shank,
+      ankle: 0.50 * sm.shank + 0.50 * sm.foot,
+      footTip: 0.50 * sm.foot,
+      elbow: 0.50 * sm.upperArm + 0.50 * sm.forearmHand,
+      wrist: 0.50 * sm.forearmHand
+    };
+    const totalMass = Object.values(nodeMasses).reduce((a, b) => a + b, 0);
+
+    // Initial pre-impact joint angles based on neuromuscular bracing & fall pitch
+    const q0 = {
+      lumbar: 0,
+      neck: 0,
+      hip: 0.04,
+      knee: 0.06,
+      ankle: 0.0,
+      shoulder: 0.05,
+      elbow: 0.15
+    };
+    if (p.angleDeg > 15) {
+      // Forward fall: active extension of upper extremities (FOOSH posture)
+      q0.shoulder = Math.min(1.4, 0.4 + 0.8 * B);
+      q0.elbow = Math.min(1.1, 0.15 + 0.4 * B);
+    } else if (p.angleDeg < -15) {
+      // Backward fall: arms reach posterior/inferior
+      q0.shoulder = Math.max(-0.6, -0.2 - 0.4 * B);
+      q0.elbow = Math.min(0.8, 0.25 * B);
     }
 
-    // Launch CoM height so lowest node point is at p.height
-    const initialCoMY = p.height - minRelY;
-    const initialCoMX = 0.0;
+    const pelvisTheta0 = (p.angleDeg * Math.PI) / 180.0;
+    const omega0 = (p.omegaDeg * Math.PI) / 180.0;
 
-    // Flight phase: find ground contact time (tContact)
+    // Compute CoM relative offset in initial release pose
+    const refPose0 = computePoseFromAngles(0, 0, pelvisTheta0, q0, anthro);
+    let comRelX0 = 0, comRelY0 = 0;
+    for (const k of Object.keys(nodeMasses)) {
+      comRelX0 += nodeMasses[k] * refPose0.nodes[k].x;
+      comRelY0 += nodeMasses[k] * refPose0.nodes[k].y;
+    }
+    comRelX0 /= totalMass;
+    comRelY0 /= totalMass;
+
+    let minBottom0 = Infinity;
+    for (const k of Object.keys(refPose0.nodes)) {
+      const b = refPose0.nodes[k].y - radii[k];
+      if (b < minBottom0) minBottom0 = b;
+    }
+
+    // Launch CoM height so lowest anatomical node point is at p.height
+    const initialHipY = p.height - minBottom0;
+    const initialHipX = 0.0;
+    const initialCoMX = initialHipX + comRelX0;
+    const initialCoMY = initialHipY + comRelY0;
+
+    // Free-flight ballistic search for first ground contact (tContact)
     const g = 9.81;
     let tContact = 0;
-    const dtFlight = 0.001; // 1 ms resolution during flight search
+    const dtFlight = 0.0005;
     let inFlight = true;
 
-    while (inFlight && tContact < 12.0) {
+    while (inFlight && tContact < 15.0) {
       tContact += dtFlight;
+      const curTheta = pelvisTheta0 + omega0 * tContact;
       const curCoMY = initialCoMY + p.vy * tContact - 0.5 * g * tContact * tContact;
-      const curTheta = theta0 + omega0 * tContact;
-      const cT = Math.cos(curTheta);
-      const sT = Math.sin(curTheta);
+      const curCoMX = initialCoMX + p.vx * tContact;
 
-      for (const k of nodeKeys) {
-        const rn = relNodes[k];
-        const ny = curCoMY + rn.dx * sT + rn.dy * cT;
-        if (ny - model.radii[k] <= 0) {
+      const poseT = computePoseFromAngles(0, 0, curTheta, q0, anthro);
+      let cRelX = 0, cRelY = 0;
+      for (const k of Object.keys(nodeMasses)) {
+        cRelX += nodeMasses[k] * poseT.nodes[k].x;
+        cRelY += nodeMasses[k] * poseT.nodes[k].y;
+      }
+      cRelX /= totalMass;
+      cRelY /= totalMass;
+      const curHipY = curCoMY - cRelY;
+
+      for (const k of Object.keys(poseT.nodes)) {
+        const ny = curHipY + poseT.nodes[k].y;
+        if (ny - radii[k] <= 0) {
           inFlight = false;
           break;
         }
@@ -559,34 +724,46 @@
     }
 
     const flightTimeS = Number(tContact.toFixed(4));
+    const contactTheta = pelvisTheta0 + omega0 * tContact;
     const contactCoMY = initialCoMY + p.vy * tContact - 0.5 * g * tContact * tContact;
     const contactCoMX = initialCoMX + p.vx * tContact;
     const contactVy = p.vy - g * tContact;
     const contactVx = p.vx;
-    const contactTheta = theta0 + omega0 * tContact;
     const impactVelocityMS = Number(Math.sqrt(contactVx * contactVx + contactVy * contactVy).toFixed(2));
 
-    // Record flight frames at 25 ms intervals so playback is smooth from release to impact
+    // Record flight frames at 25 ms intervals for smooth playback from release to impact
     const frames = [];
     const flightFrameInterval = 0.025;
     let curFlightT = 0;
     while (curFlightT < tContact - 1e-4) {
+      const fTheta = pelvisTheta0 + omega0 * curFlightT;
       const fCoMY = initialCoMY + p.vy * curFlightT - 0.5 * g * curFlightT * curFlightT;
       const fCoMX = initialCoMX + p.vx * curFlightT;
       const fVy = p.vy - g * curFlightT;
       const fVx = p.vx;
-      const fTheta = theta0 + omega0 * curFlightT;
-      const fcT = Math.cos(fTheta);
-      const fsT = Math.sin(fTheta);
+
+      const poseF = computePoseFromAngles(0, 0, fTheta, q0, anthro);
+      let cRelX = 0, cRelY = 0;
+      for (const k of Object.keys(nodeMasses)) {
+        cRelX += nodeMasses[k] * poseF.nodes[k].x;
+        cRelY += nodeMasses[k] * poseF.nodes[k].y;
+      }
+      cRelX /= totalMass;
+      cRelY /= totalMass;
+      const fHipX = fCoMX - cRelX;
+      const fHipY = fCoMY - cRelY;
 
       const fNodes = {};
-      for (const k of nodeKeys) {
-        const rn = relNodes[k];
+      for (const k of Object.keys(poseF.nodes)) {
+        const nx = fHipX + poseF.nodes[k].x;
+        const ny = fHipY + poseF.nodes[k].y;
+        const rx = nx - fCoMX;
+        const ry = ny - fCoMY;
         fNodes[k] = {
-          x: Number((fCoMX + rn.dx * fcT - rn.dy * fsT).toFixed(4)),
-          y: Number((fCoMY + rn.dx * fsT + rn.dy * fcT).toFixed(4)),
-          vx: Number((fVx - omega0 * (rn.dx * fsT + rn.dy * fcT)).toFixed(2)),
-          vy: Number((fVy + omega0 * (rn.dx * fcT - rn.dy * fsT)).toFixed(2))
+          x: Number(nx.toFixed(4)),
+          y: Number(ny.toFixed(4)),
+          vx: Number((fVx - omega0 * ry).toFixed(2)),
+          vy: Number((fVy + omega0 * rx).toFixed(2))
         };
       }
       const segZeroFI = {};
@@ -607,54 +784,7 @@
       curFlightT += flightFrameInterval;
     }
 
-    // Initialize node kinematics at moment of first contact
-    const cT = Math.cos(contactTheta);
-    const sT = Math.sin(contactTheta);
-    const nodes = {};
-    for (const k of nodeKeys) {
-      const rn = relNodes[k];
-      const nx = contactCoMX + rn.dx * cT - rn.dy * sT;
-      const ny = contactCoMY + rn.dx * sT + rn.dy * cT;
-      const rx = nx - contactCoMX;
-      const ry = ny - contactCoMY;
-      const nvx = contactVx - omega0 * ry;
-      const nvy = contactVy + omega0 * rx;
-      nodes[k] = {
-        x: nx,
-        y: ny,
-        vx: nvx,
-        vy: nvy,
-        prevX: nx,
-        prevY: ny,
-        m: model.nodeMasses[k],
-        r: model.radii[k]
-      };
-    }
-
-    // Bone links between articulated nodes
-    const linkDefs = [
-      { seg: 'head', n1: 'headTop', n2: 'headCenter' },
-      { seg: 'neck', n1: 'headCenter', n2: 'neckBase' },
-      { seg: 'thorax', n1: 'neckBase', n2: 'midThorax' },
-      { seg: 'lumbarPelvis', n1: 'midThorax', n2: 'hipPelvis' },
-      { seg: 'thigh', n1: 'hipPelvis', n2: 'knee' },
-      { seg: 'shank', n1: 'knee', n2: 'ankle' },
-      { seg: 'foot', n1: 'ankle', n2: 'footTip' },
-      { seg: 'upperArm', n1: 'neckBase', n2: 'elbow' },
-      { seg: 'forearmHand', n1: 'elbow', n2: 'wrist' }
-    ];
-
-    const links = linkDefs.map(ld => {
-      const d = dist2(model.loc[ld.n1], model.loc[ld.n2]);
-      return {
-        seg: ld.seg,
-        n1: ld.n1,
-        n2: ld.n2,
-        restL: d
-      };
-    });
-
-    // 2000 Hz Sub-stepped Contact Phase (dt = 0.0005 s, 0.40 seconds duration)
+    // 2000 Hz Sub-stepped Contact Phase (dt = 0.0005 s, duration 0.40 s)
     const dt = 0.0005;
     const contactDuration = 0.40;
     const numSteps = Math.round(contactDuration / dt);
@@ -672,55 +802,155 @@
 
     const timeSeries = [];
     const headAccGList = [];
-
     let peakGRF = 0;
     let cumDissipatedEnergy = 0;
     const impactFrameInterval = 0.002; // every 2 ms for high-speed replay
     let nextFrameTime = tContact;
 
-    // Calibrated physical contact stiffness multipliers for viscoelastic ground
-    const kPhys = kSurf * 75.0; // Effective contact stiffness N/m^1.35
-    const cPhys = cSurf * 30.0; // Effective contact damping N*s/m^1.5
+    // Contact state variables
+    let comX = contactCoMX;
+    let comY = contactCoMY;
+    let comVx = contactVx;
+    let comVy = contactVy;
+    let pelvisTheta = contactTheta;
+    let omega = omega0;
+    const q = { ...q0 };
+    let reboundDecay = 1.0;
+
+    const yTouchdown = contactCoMY;
 
     for (let step = 0; step <= numSteps; step++) {
       const curTime = tContact + step * dt;
 
-      // 1. Viscoelastic ground contact forces
+      // 1. Forward Kinematics at current pose
+      const pose = computePoseFromAngles(0, 0, pelvisTheta, q, anthro);
+      let comRelX = 0, comRelY = 0;
+      for (const k of Object.keys(nodeMasses)) {
+        comRelX += nodeMasses[k] * pose.nodes[k].x;
+        comRelY += nodeMasses[k] * pose.nodes[k].y;
+      }
+      comRelX /= totalMass;
+      comRelY /= totalMass;
+
+      let hipX = comX - comRelX;
+      let hipY = comY - comRelY;
+
+      // World node positions
+      const curNodes = {};
+      for (const k of Object.keys(pose.nodes)) {
+        curNodes[k] = {
+          x: hipX + pose.nodes[k].x,
+          y: hipY + pose.nodes[k].y
+        };
+      }
+
+      // 2. Lowest node clearance and ground penetration
+      const nodeDepths = {};
+      let minNodeBot = Infinity;
+      let deepestKey = null;
+      let maxNodeDepth = 0;
+
+      for (const k of Object.keys(curNodes)) {
+        const bot = curNodes[k].y - radii[k];
+        if (bot < minNodeBot) {
+          minNodeBot = bot;
+          deepestKey = k;
+        }
+        const depth = Math.max(0, -bot);
+        nodeDepths[k] = depth;
+        if (depth > maxNodeDepth) maxNodeDepth = depth;
+      }
+
       let stepFzTotal = 0;
       let stepFxTotal = 0;
       const contactFn = {};
       const contactFt = {};
+      for (const k of Object.keys(curNodes)) {
+        contactFn[k] = 0;
+        contactFt[k] = 0;
+      }
 
-      for (const k of nodeKeys) {
-        const nd = nodes[k];
-        const depth = nd.r - nd.y;
-        if (depth > 0) {
-          const vNorm = -nd.vy;
-          // Non-linear Hunt-Crossley formulation
-          let fn = kPhys * Math.pow(depth, 1.35) + cPhys * Math.sqrt(depth) * Math.max(0, vNorm);
-          if (fn < 0) fn = 0;
-          const maxFt = muSurf * fn;
-          const ft = -Math.max(-maxFt, Math.min(maxFt, 1200 * nd.vx));
+      const isContact = (maxNodeDepth > 0 || minNodeBot <= 0);
 
-          contactFn[k] = fn;
-          contactFt[k] = ft;
-          stepFzTotal += fn;
-          stepFxTotal += ft;
+      if (isContact) {
+        // Effective series contact compliance:
+        // Combine surface stiffness (kSurf) with body soft-tissue & joint flexion compliance (kBody)
+        const isExtremity = ['footTip', 'ankle', 'knee', 'wrist', 'elbow'].includes(deepestKey);
+        const kBody = isExtremity ? (28 + 18 * B) * (p.mass / 75) : 95 * (p.mass / 75);
+        const kEff = (kSurf * kBody) / (kSurf + kBody); // kN/m
+
+        const comp = Math.max(0, yTouchdown - comY);
+        const effComp = Math.max(maxNodeDepth, comp);
+
+        const kSpr = kEff * 1000 * 0.26;
+        const cDamp = 1250 * Math.sqrt(kEff / 37.0) * (p.mass / 75);
+
+        if (comVy < 0) {
+          // On downward compression: viscoelastic spring + damper proportional to kEff and velocity
+          const vDown = -comVy;
+          stepFzTotal = kSpr * Math.pow(effComp, 1.10) + cDamp * Math.pow(effComp, 0.38) * Math.pow(vDown, 1.08);
         } else {
-          contactFn[k] = 0;
-          contactFt[k] = 0;
+          // On upward rebound: clamp upward velocity and rapidly decay contact force (restitution e < 0.08)
+          reboundDecay *= Math.max(0, 1 - 40 * dt);
+          stepFzTotal = Math.max(0, kSpr * 0.05 * Math.pow(effComp, 1.10) - cDamp * 0.10 * comVy) * reboundDecay;
+          if (Math.abs(comVy) < 0.15) {
+            stepFzTotal = Math.max(stepFzTotal, totalMass * g * (1 - reboundDecay));
+          }
+        }
+        if (stepFzTotal < 0) stepFzTotal = 0;
+
+        // Distribute vertical Ground Reaction Force among contacting nodes
+        let sumW = 0;
+        for (const k of Object.keys(curNodes)) {
+          if (nodeDepths[k] > 0) {
+            sumW += Math.pow(nodeDepths[k], 1.1) * radii[k];
+          }
+        }
+        if (sumW > 0) {
+          for (const k of Object.keys(curNodes)) {
+            if (nodeDepths[k] > 0) {
+              const w = Math.pow(nodeDepths[k], 1.1) * radii[k];
+              contactFn[k] = stepFzTotal * (w / sumW);
+            }
+          }
+        } else if (deepestKey) {
+          contactFn[deepestKey] = stepFzTotal;
+        }
+
+        // Horizontal Friction (Fx): strictly opposes comVx, decays toward 0, NEVER increases or reverses
+        if (Math.abs(comVx) > 1e-4 && stepFzTotal > 0) {
+          const maxFxSlip = muSurf * stepFzTotal;
+          const maxFxStop = Math.abs(comVx) * totalMass / dt * 0.25;
+          stepFxTotal = -Math.sign(comVx) * Math.min(maxFxSlip, maxFxStop);
+        } else {
+          stepFxTotal = 0;
+        }
+
+        for (const k of Object.keys(curNodes)) {
+          if (stepFzTotal > 0) {
+            contactFt[k] = stepFxTotal * (contactFn[k] / stepFzTotal);
+          } else {
+            contactFt[k] = 0;
+          }
+        }
+      }
+
+      // Non-tunneling ground limit: shift (hipX, hipY) so lowest contacting node never sinks below -0.01 m
+      if (minNodeBot < -0.01) {
+        const shiftY = -0.01 - minNodeBot;
+        hipY += shiftY;
+        for (const k of Object.keys(curNodes)) {
+          curNodes[k].y += shiftY;
         }
       }
 
       const currentFzKN = stepFzTotal / 1000;
-      if (currentFzKN > peakGRF) {
-        peakGRF = currentFzKN;
-      }
+      if (currentFzKN > peakGRF) peakGRF = currentFzKN;
 
-      // 2. Direct segment contact forces (kN)
+      // 3. Direct segment contact forces (kN)
       const directContactSeg = {
         head: (contactFn.headTop + contactFn.headCenter) / 1000,
-        neck: 0,
+        neck: (contactFn.neckBase * 0.4) / 1000,
         thorax: contactFn.midThorax / 1000,
         lumbarPelvis: contactFn.hipPelvis / 1000,
         thigh: (contactFn.knee * 0.5) / 1000,
@@ -732,29 +962,24 @@
 
       for (const segId of Object.keys(directContactSeg)) {
         const f = directContactSeg[segId];
-        if (f > peakContactForces[segId]) {
-          peakContactForces[segId] = f;
-        }
-        if (f > 0.35 && firstContactTime[segId] === null) {
-          firstContactTime[segId] = curTime;
-        }
+        if (f > peakContactForces[segId]) peakContactForces[segId] = f;
+        if (f > 0.35 && firstContactTime[segId] === null) firstContactTime[segId] = curTime;
       }
 
-      // 3. Dynamic axial wave conduction along skeletal chain
+      // 4. Dynamic axial wave conduction along skeletal chain
       const footAxial = directContactSeg.foot;
       const shankAxial = footAxial * 0.88 + directContactSeg.shank;
       const thighAxial = shankAxial * 0.80 + directContactSeg.thigh + (directContactSeg.lumbarPelvis > 1.0 ? directContactSeg.lumbarPelvis * 0.55 : 0);
 
       // Thoracolumbar T12-L1 & Pelvis:
-      const bodyDecel = stepFzTotal / model.totalMass;
-      const upperBodyMass = model.nodeMasses.headTop + model.nodeMasses.headCenter + model.nodeMasses.neckBase + model.nodeMasses.midThorax;
+      const bodyDecel = stepFzTotal / totalMass;
+      const upperBodyMass = nodeMasses.headTop + nodeMasses.headCenter + nodeMasses.neckBase + nodeMasses.midThorax;
       const upperInertialLoadKN = (upperBodyMass * bodyDecel) / 1000;
       const lumbarPelvisAxial = Math.max(directContactSeg.lumbarPelvis, thighAxial * 0.68 + upperInertialLoadKN * 0.70);
 
       const thoraxAxial = Math.max(directContactSeg.thorax, upperInertialLoadKN * 0.40);
-      const neckAxial = (model.nodeMasses.headCenter + model.nodeMasses.headTop) * bodyDecel / 1000;
+      const neckAxial = (nodeMasses.headCenter + nodeMasses.headTop) * bodyDecel / 1000;
       const headAxial = directContactSeg.head + neckAxial * 0.40;
-
       const armAxial = directContactSeg.forearmHand * 0.75 + directContactSeg.upperArm;
 
       const currentSegLoads = {
@@ -782,94 +1007,97 @@
         Math.pow(contactFt.headTop + contactFt.headCenter, 2) +
         Math.pow(contactFn.headTop + contactFn.headCenter + neckAxial * 1000 * 0.40, 2)
       );
-      const headM = model.nodeMasses.headCenter + model.nodeMasses.headTop;
+      const headM = nodeMasses.headCenter + nodeMasses.headTop;
       const headAccG = fHeadNet / (headM * g);
       headAccGList.push(headAccG);
 
-      // 4. Integrate node positions (Semi-implicit Euler)
-      for (const k of nodeKeys) {
-        const nd = nodes[k];
-        nd.prevX = nd.x;
-        nd.prevY = nd.y;
+      // 5. Biofidelic Joint Flexion & Secondary Body Folding
+      const qTargets = { ...q0 };
 
-        const ax = contactFt[k] / nd.m;
-        const ay = -g + contactFn[k] / nd.m;
-
-        nd.vx += ax * dt;
-        nd.vy += ay * dt;
-
-        nd.x += nd.vx * dt;
-        nd.y += nd.vy * dt;
+      if (Math.abs(contactTheta) < 50 * Math.PI / 180) {
+        // Upright / feet-first landing:
+        // Knee flexes (45-95 deg), ankle dorsiflexes (+22 deg), hip flexes (40-85 deg), spine flexes
+        const kneeDeg = Math.min(95, 45 + 10 * Math.sqrt(p.height) + 15 * (1 - B));
+        qTargets.knee = kneeDeg * Math.PI / 180;
+        qTargets.ankle = 22 * Math.PI / 180;
+        const hipDeg = Math.min(85, 40 + 8 * Math.sqrt(p.height) + 10 * (1 - B));
+        qTargets.hip = hipDeg * Math.PI / 180;
+        const lumbarDeg = Math.min(55, 30 + 5 * Math.sqrt(p.height));
+        qTargets.lumbar = lumbarDeg * Math.PI / 180;
+        qTargets.neck = Math.min(30, 15 + 3 * Math.sqrt(p.height)) * Math.PI / 180;
+      } else if (contactTheta >= 25 * Math.PI / 180) {
+        // Forward-pitched landing: arms flex at elbow/shoulder absorbing FOOSH, torso/head rotate down
+        qTargets.shoulder = Math.min(150 * Math.PI / 180, (85 + 35 * B) * Math.PI / 180);
+        qTargets.elbow = Math.min(135 * Math.PI / 180, (45 + 40 * (1 - B)) * Math.PI / 180);
+        qTargets.lumbar = 40 * Math.PI / 180;
+        qTargets.neck = 30 * Math.PI / 180;
+      } else if (contactTheta <= -25 * Math.PI / 180) {
+        // Backward/supine landing: pelvis/back strikes first followed by rapid neck/head whip
+        qTargets.lumbar = -10 * Math.PI / 180;
+        qTargets.neck = -25 * Math.PI / 180;
       }
 
-      // 5. Position-Based Dynamics (PBD) distance & joint constraint relaxation
-      for (let iter = 0; iter < 5; iter++) {
-        for (const link of links) {
-          const n1 = nodes[link.n1];
-          const n2 = nodes[link.n2];
-          const dx = n2.x - n1.x;
-          const dy = n2.y - n1.y;
-          const curD = Math.sqrt(dx * dx + dy * dy);
-          if (curD > 1e-6) {
-            const diff = (curD - link.restL) / curD;
-            const w1 = 1 / n1.m;
-            const w2 = 1 / n2.m;
-            const wSum = w1 + w2;
+      // Drive joint angles smoothly toward target RoM postures
+      const flexRate = (stepFzTotal > 50) ? Math.min(30, 10 + 15 * (stepFzTotal / (totalMass * g))) : 4;
+      for (const j of Object.keys(ROM_LIMITS)) {
+        const target = qTargets[j] != null ? qTargets[j] : q0[j];
+        q[j] += (target - q[j]) * flexRate * dt;
+        q[j] = Math.max(ROM_LIMITS[j].min, Math.min(ROM_LIMITS[j].max, q[j]));
+      }
 
-            n1.x += dx * (diff * w1 / wSum);
-            n1.y += dy * (diff * w1 / wSum);
-            n2.x -= dx * (diff * w2 / wSum);
-            n2.y -= dy * (diff * w2 / wSum);
+      // Torso/pelvis rotation under contact moments
+      if (stepFzTotal > 0) {
+        let netTorque = 0;
+        for (const k of Object.keys(curNodes)) {
+          if (contactFn[k] > 0 || contactFt[k] !== 0) {
+            const rx = curNodes[k].x - comX;
+            const ry = curNodes[k].y - comY;
+            netTorque += (rx * contactFn[k] - ry * contactFt[k]);
           }
         }
+        const I_body = totalMass * Math.pow(0.28 * H, 2);
+        const alphaRot = netTorque / I_body;
+        omega += alphaRot * dt;
+        omega *= Math.max(0, 1 - (10 + 20 * (stepFzTotal / (totalMass * g))) * dt);
+      } else {
+        omega *= Math.max(0, 1 - 0.5 * dt);
+      }
+      pelvisTheta += omega * dt;
 
-        // Knee hyperextension physiological limit
-        const thighDx = nodes.hipPelvis.x - nodes.knee.x;
-        const thighDy = nodes.hipPelvis.y - nodes.knee.y;
-        const shankDx = nodes.ankle.x - nodes.knee.x;
-        const shankDy = nodes.ankle.y - nodes.knee.y;
-        const kneeCross = thighDx * shankDy - thighDy * shankDx;
-        if (kneeCross < 0) {
-          nodes.knee.x += 0.001 * (1 + p.bracing);
-        }
+      // 6. Integrate CoM position & velocity
+      const comAy = -g + stepFzTotal / totalMass;
+      const comAx = stepFxTotal / totalMass;
+      comVy += comAy * dt;
+      comVx += comAx * dt;
 
-        // Hard non-tunneling ground limit
-        for (const k of nodeKeys) {
-          const nd = nodes[k];
-          if (nd.y < nd.r * 0.10) {
-            nd.y = nd.r * 0.10;
-          }
-        }
+      // Rebound clamping
+      if (comVy > 0.25) comVy = 0.25;
+      if (minNodeBot <= 0.005 && Math.abs(comVy) < 0.15 && stepFzTotal > totalMass * g * 0.5) {
+        comVy *= 0.90;
       }
 
-      // Update velocities from corrected positions
-      for (const k of nodeKeys) {
-        const nd = nodes[k];
-        nd.vx = (nd.x - nd.prevX) / dt;
-        nd.vy = (nd.y - nd.prevY) / dt;
-      }
+      comY += comVy * dt;
+      comX += comVx * dt;
 
-      // Energy tracking
-      let ek = 0, ep = 0;
-      let comX = 0, comY = 0, comVx = 0, comVy = 0;
-      for (const k of nodeKeys) {
-        const nd = nodes[k];
-        ek += 0.5 * nd.m * (nd.vx * nd.vx + nd.vy * nd.vy);
-        ep += nd.m * g * Math.max(0, nd.y);
-        comX += nd.m * nd.x;
-        comY += nd.m * nd.y;
-        comVx += nd.m * nd.vx;
-        comVy += nd.m * nd.vy;
+      // Compute smooth nodal velocities without numerical projection noise
+      const frameNodes = {};
+      for (const k of Object.keys(curNodes)) {
+        const rx = curNodes[k].x - comX;
+        const ry = curNodes[k].y - comY;
+        frameNodes[k] = {
+          x: Number(curNodes[k].x.toFixed(4)),
+          y: Number(curNodes[k].y.toFixed(4)),
+          vx: Number((comVx - omega * ry).toFixed(2)),
+          vy: Number((comVy + omega * rx).toFixed(2))
+        };
       }
-      comX /= model.totalMass;
-      comY /= model.totalMass;
-      comVx /= model.totalMass;
-      comVy /= model.totalMass;
 
       cumDissipatedEnergy += (stepFzTotal * Math.abs(comVy) + Math.abs(stepFxTotal * comVx)) * dt;
 
-      // Downsample time series for performance
+      // Downsample time series (every 4 steps, i.e. 2 ms)
       if (step % 4 === 0) {
+        const ep = totalMass * g * Math.max(0, comY);
+        const ek = 0.5 * totalMass * (comVx * comVx + comVy * comVy);
         timeSeries.push({
           t: Number(curTime.toFixed(4)),
           fzTotal: Number(currentFzKN.toFixed(2)),
@@ -882,18 +1110,9 @@
         });
       }
 
-      // Store high-resolution frames every 2 ms for smooth timeline scrubbing & video export
+      // Store high-resolution frames every 2 ms for timeline playback and video export
       if (curTime >= nextFrameTime - 1e-6) {
         nextFrameTime += impactFrameInterval;
-        const snapshotNodes = {};
-        for (const k of nodeKeys) {
-          snapshotNodes[k] = {
-            x: Number(nodes[k].x.toFixed(4)),
-            y: Number(nodes[k].y.toFixed(4)),
-            vx: Number(nodes[k].vx.toFixed(2)),
-            vy: Number(nodes[k].vy.toFixed(2))
-          };
-        }
         const segInstantFI = {};
         for (const def of SEGMENT_DEFINITIONS) {
           const segTol = anthro.segments[def.id].toleranceKN;
@@ -901,7 +1120,7 @@
         }
         frames.push({
           t: Number(curTime.toFixed(4)),
-          nodes: snapshotNodes,
+          nodes: frameNodes,
           comX: Number(comX.toFixed(4)),
           comY: Number(comY.toFixed(4)),
           comVx: Number(comVx.toFixed(2)),
@@ -914,9 +1133,9 @@
       }
     }
 
-    // 6. Post-Simulation Assessment & Forensic Diagnosis
+    // 7. Post-Simulation Assessment & Forensic Diagnosis
     const hic15 = calculateHIC15(headAccGList, dt);
-    const peakHeadG = Number(Math.max(...headAccGList).toFixed(1));
+    const peakHeadG = Number(Math.max(...headAccGList, 1.0).toFixed(1));
 
     const segmentResults = [];
     let fractureCount = 0;
@@ -1066,13 +1285,70 @@
       overallMortalityRisk
     };
 
+    // 8. Keyframes Export: 5 key phase snapshots across the fall event
+    let peakGRFTimeS = flightTimeS;
+    let maxFzFound = 0;
+    for (const f of frames) {
+      if (f.fzTotal > maxFzFound) {
+        maxFzFound = f.fzTotal;
+        peakGRFTimeS = f.t;
+      }
+    }
+
+    function findClosestFrame(targetT) {
+      let closest = frames[0];
+      let minDiff = Infinity;
+      for (const f of frames) {
+        const diff = Math.abs(f.t - targetT);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = f;
+        }
+      }
+      return closest;
+    }
+
+    const keyframes = [
+      {
+        phase: 'release',
+        label: 'Release (t = 0.000 s)',
+        description: 'Initial fall release at designated elevation',
+        ...frames[0]
+      },
+      {
+        phase: 'mid_flight',
+        label: 'Mid-Flight Rotation',
+        description: 'Mid-flight ballistic trajectory & body rotation',
+        ...findClosestFrame(0.5 * flightTimeS)
+      },
+      {
+        phase: 'touchdown',
+        label: 'Initial Touchdown',
+        description: 'First anatomical contact with ground substrate',
+        ...findClosestFrame(flightTimeS)
+      },
+      {
+        phase: 'peak_grf',
+        label: 'Peak GRF Deceleration',
+        description: 'Maximum ground reaction force & peak deceleration',
+        ...findClosestFrame(peakGRFTimeS)
+      },
+      {
+        phase: 'final_resting',
+        label: 'Final Resting Posture',
+        description: 'Post-impact resting equilibrium pose',
+        ...frames[frames.length - 1]
+      }
+    ];
+
     return {
       params: p,
       anthropometrics: anthro,
       frames,
       timeSeries,
       segmentResults,
-      summary
+      summary,
+      keyframes
     };
   }
 
@@ -1134,8 +1410,11 @@
     TOLERANCE_PROFILES,
     SCENARIO_PRESETS,
     SEGMENT_DEFINITIONS,
+    ROM_LIMITS,
     defaultParams,
     computeAnthropometrics,
+    computePoseFromAngles,
+    buildAnatomicalModel,
     calculateHIC15,
     runSimulation,
     runHeightSweep,

@@ -28,12 +28,14 @@
        ========================================================================== -->
   <header class="site-header">
     <div class="brand-wrapper">
-      <img src="EBLlogo.png" 
-           alt="LTU Experimental Biomechanics Lab Logo" 
-           class="brand-logo" 
-           onerror="this.onerror=null; this.src='https://storage.googleapis.com/eblsquattracker/EBLlogo2.png';">
+      <a href="https://ltuebl.github.io/" target="_blank" rel="noopener noreferrer" class="brand-logo-link" title="Visit LTU Experimental Biomechanics Lab Main Website">
+        <img src="EBLlogo.png" 
+             alt="LTU Experimental Biomechanics Lab Logo" 
+             class="brand-logo" 
+             onerror="this.onerror=null; this.src='https://storage.googleapis.com/eblsquattracker/EBLlogo2.png';">
+      </a>
       <div class="brand-titles">
-        <h1>LTU Experimental Biomechanics Lab · MSU Forensic Anthropology Collaborative</h1>
+        <h1>LTU Experimental Biomechanics Lab · MSU Forensic Anthropology</h1>
         <p>Interactive Multi-Body Dynamics (MBD) Human Fall, Impact Kinetics &amp; Skeletal Fracture Simulator</p>
       </div>
     </div>
@@ -467,6 +469,83 @@
                 </div>
               </div>
               <input type="range" id="slider-timeline" class="timeline-slider" min="0" max="1000" value="0" step="1">
+            </div>
+
+            <!-- Phase Keyframe Filmstrip Bar -->
+            <div class="keyframe-filmstrip-container" id="keyframe-filmstrip-container">
+              <div class="filmstrip-header">
+                <div class="filmstrip-title">
+                  <span class="filmstrip-icon">🎞️</span>
+                  <strong>Biomechanical Phase Filmstrip</strong>
+                  <span class="filmstrip-subtitle">Select any phase keyframe to jump directly to critical kinematics</span>
+                </div>
+              </div>
+              <div class="keyframe-filmstrip" id="keyframe-filmstrip">
+                <!-- Keyframe 0: Launch / Release -->
+                <div class="keyframe-card active-phase" data-keyframe-idx="0" tabindex="0" role="button" aria-label="Phase 1: Launch / Release">
+                  <div class="keyframe-card-badge">Phase 1</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="canvas-kf-0" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Launch / Release</div>
+                    <div class="keyframe-card-time" id="kf-time-0">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-metrics-0">v = 0.0 m/s · Alt = 0.00 m</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 1: Mid-Flight Rotation -->
+                <div class="keyframe-card" data-keyframe-idx="1" tabindex="0" role="button" aria-label="Phase 2: Mid-Flight Rotation">
+                  <div class="keyframe-card-badge">Phase 2</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="canvas-kf-1" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Mid-Flight Rotation</div>
+                    <div class="keyframe-card-time" id="kf-time-1">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-metrics-1">v = 0.0 m/s · Alt = 0.00 m</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 2: Primary Touchdown -->
+                <div class="keyframe-card" data-keyframe-idx="2" tabindex="0" role="button" aria-label="Phase 3: Primary Touchdown">
+                  <div class="keyframe-card-badge">Phase 3</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="canvas-kf-2" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Primary Touchdown</div>
+                    <div class="keyframe-card-time" id="kf-time-2">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-metrics-2">v = 0.0 m/s · GRF = 0.0 N</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 3: Peak GRF & Flexion -->
+                <div class="keyframe-card" data-keyframe-idx="3" tabindex="0" role="button" aria-label="Phase 4: Peak GRF & Flexion">
+                  <div class="keyframe-card-badge">Phase 4</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="canvas-kf-3" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Peak GRF &amp; Flexion</div>
+                    <div class="keyframe-card-time" id="kf-time-3">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-metrics-3">v = 0.0 m/s · GRF = 0.0 N</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 4: Post-Impact Rest -->
+                <div class="keyframe-card" data-keyframe-idx="4" tabindex="0" role="button" aria-label="Phase 5: Post-Impact Rest">
+                  <div class="keyframe-card-badge">Phase 5</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="canvas-kf-4" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Post-Impact Rest</div>
+                    <div class="keyframe-card-time" id="kf-time-4">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-metrics-4">v = 0.0 m/s · GRF = 0.0 N</div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- Live 6-Card Telemetry Ribbon -->
@@ -1235,8 +1314,16 @@
        Site Footer
        ========================================================================== -->
   <footer class="site-footer">
+    <div class="footer-links-row">
+      <a href="https://ltuebl.github.io/" target="_blank" rel="noopener noreferrer" class="footer-link">
+        <span>🌐</span> LTU Experimental Biomechanics Laboratory (EBL) Main Portal &rarr;
+      </a>
+      <a href="https://github.com/LTUebl/FallBiomechanicsSimulator" target="_blank" rel="noopener noreferrer" class="footer-link">
+        <span>💻</span> GitHub Repository
+      </a>
+    </div>
     <p>
-      <strong>LTU Experimental Biomechanics Lab</strong> · Michigan State University Forensic Anthropology Collaborative &copy; 2026.
+      <strong>LTU Experimental Biomechanics Lab</strong> · Michigan State University Forensic Anthropology &copy; 2026.
       <br>
       High-Performance Articulated Multi-Body Dynamics &amp; Forensic Skeletal Trauma Simulator. Developed for graduate research, bioengineering instruction, and forensic investigation.
     </p>

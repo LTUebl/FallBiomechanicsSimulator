@@ -1,5 +1,5 @@
 /* ==========================================================================
-   LTU Experimental Biomechanics Lab · MSU Forensic Anthropology Collaborative
+   LTU Experimental Biomechanics Lab · MSU Forensic Anthropology
    Interactive Multi-Body Dynamics (MBD) Human Fall, Impact Kinetics &
    Skeletal Fracture Simulator
    Style System - LTU EBL Scientific Dashboard & Sequential Workflow UI
@@ -95,6 +95,18 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.brand-logo-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.brand-logo-link:hover {
+  opacity: 0.90;
+  transform: scale(1.02);
 }
 
 .brand-logo {
@@ -725,6 +737,166 @@ body {
   height: 7px;
   accent-color: var(--color-primary);
   cursor: pointer;
+}
+
+/* ==========================================================================
+   Phase Keyframe Filmstrip Bar (Tab 2)
+   ========================================================================== */
+.keyframe-filmstrip-container {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filmstrip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filmstrip-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  color: var(--color-text-main);
+}
+
+.filmstrip-icon {
+  font-size: 0.95rem;
+}
+
+.filmstrip-subtitle {
+  font-size: 0.70rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+  margin-left: 0.35rem;
+}
+
+.keyframe-filmstrip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.6rem;
+}
+
+@media (max-width: 960px) {
+  .keyframe-filmstrip {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .keyframe-filmstrip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.keyframe-card {
+  position: relative;
+  background: #ffffff;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+  user-select: none;
+}
+
+.keyframe-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.20);
+}
+
+.keyframe-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.keyframe-card.active-phase {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.35), 0 4px 14px rgba(2, 132, 199, 0.25);
+  background: #f0f9ff;
+}
+
+.keyframe-card.active-phase .keyframe-card-badge {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.keyframe-card-badge {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  z-index: 2;
+  font-size: 0.60rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(15, 23, 42, 0.82);
+  color: #cbd5e1;
+  padding: 0.12rem 0.4rem;
+  border-radius: 4px;
+  backdrop-filter: blur(2px);
+  transition: background 0.15s, color 0.15s;
+}
+
+.keyframe-canvas-wrapper {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #0f172a;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.keyframe-mini-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.keyframe-card-body {
+  padding: 0.4rem 0.5rem 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: inherit;
+}
+
+.keyframe-card-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.keyframe-card-time {
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
+
+.keyframe-card-metrics {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ==========================================================================
@@ -1676,8 +1848,46 @@ input[type="range"] {
   margin-top: auto;
   background: #ffffff;
   border-top: 1px solid var(--color-border);
-  padding: 1rem 1.5rem;
+  padding: 1.25rem 1.5rem;
   text-align: center;
-  font-size: 0.77rem;
+  font-size: 0.78rem;
   color: var(--color-text-muted);
+}
+
+.footer-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-primary-dark);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-decoration: none;
+  padding: 0.35rem 0.85rem;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.16s ease;
+}
+
+.footer-link:hover {
+  background: var(--color-primary-light);
+  border-color: #38bdf8;
+  color: var(--color-primary-dark);
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.18);
+  transform: translateY(-1px);
+}
+
+.site-footer p {
+  margin: 0;
+  line-height: 1.55;
 }
