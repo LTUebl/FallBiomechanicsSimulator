@@ -1891,3 +1891,53 @@ input[type="range"] {
   margin: 0;
   line-height: 1.55;
 }
+
+/* ==========================================================================
+   Step 3 Analysis Keyframe Filmstrip & PDF Export Styles
+   ========================================================================== */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.analysis-filmstrip-container {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.analysis-keyframe-card {
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.analysis-keyframe-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.20);
+}
+
+.analysis-keyframe-card.active-phase {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.35), 0 4px 14px rgba(2, 132, 199, 0.25);
+  background: #f0f9ff;
+}
+
+.analysis-keyframe-card.pulse-selected {
+  animation: pulseKeyframe 0.5s ease-out;
+}
+
+@keyframes pulseKeyframe {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.03); box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.4); }
+  100% { transform: scale(1); }
+}
+
+.btn-exporting {
+  opacity: 0.8;
+  cursor: wait;
+}

@@ -314,9 +314,18 @@
       badgeEventPeak: document.getElementById('badge-event-peak'),
       badgeEventRest: document.getElementById('badge-event-rest'),
 
-      // Keyframe Filmstrip
+      // Keyframe Filmstrip (Step 2)
       keyframeFilmstripContainer: document.getElementById('keyframe-filmstrip-container'),
       keyframeFilmstrip: document.getElementById('keyframe-filmstrip'),
+
+      // Keyframe Filmstrip (Step 3 Analysis)
+      keyframeFilmstripAnalysisContainer: document.getElementById('keyframe-filmstrip-analysis-container'),
+      keyframeFilmstripAnalysis: document.getElementById('keyframe-filmstrip-analysis'),
+
+      // Export PDF Buttons
+      btnExportPdf: document.getElementById('btn-export-pdf'),
+      btnExportPdfFooter: document.getElementById('btn-export-pdf-footer'),
+      btnExportPdfHeader: document.getElementById('btn-export-pdf-header'),
 
       // Simulation HUD
       hudSimTime: document.getElementById('hud-sim-time'),
@@ -717,6 +726,8 @@
       renderSegmentDiagnosticCards();
       updateForensicDiagnosisBanner();
       updateAnalysisCharts();
+      renderKeyframeFilmstrip();
+      updateKeyframeHighlight();
     } else if (mode === 'sweep') {
       if (state.isSweepDirty || !state.sweepResult) {
         runSweepCalculation();
@@ -732,8 +743,10 @@
   function setupHiDPICanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    const w = rect.width > 0 ? rect.width : canvas.width;
-    const h = rect.height > 0 ? rect.height : canvas.height;
+    const attrW = canvas.getAttribute('width') ? parseInt(canvas.getAttribute('width'), 10) : null;
+    const attrH = canvas.getAttribute('height') ? parseInt(canvas.getAttribute('height'), 10) : null;
+    const w = rect.width > 0 ? rect.width : (attrW || 800);
+    const h = rect.height > 0 ? rect.height : (attrH || 400);
 
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
@@ -1847,30 +1860,40 @@
 
     state.playback.keyframeIndices = [idx0, idx1, idx2, idx3, idx4];
 
-    // 2. Render each keyframe card
+    // 2. Render each keyframe card for BOTH Step 2 and Step 3 Filmstrips
     for (let k = 0; k < 5; k++) {
       const frameIdx = state.playback.keyframeIndices[k];
       const f = frames[frameIdx];
       if (!f) continue;
 
-      // Update text readouts
+      const timeStr = `t = ${f.t.toFixed(3)} s`;
+      const vMag = Math.hypot(f.comVx, f.comVy).toFixed(1);
+      const metricStr = f.fzTotal > 0.1
+        ? `v = ${vMag} m/s · GRF = ${f.fzTotal.toFixed(1)} kN`
+        : `v = ${vMag} m/s · Alt = ${Math.max(0, f.comY).toFixed(2)} m`;
+
+      // Update Step 2 text readouts
       const timeEl = document.getElementById(`kf-time-${k}`);
-      if (timeEl) timeEl.textContent = `t = ${f.t.toFixed(3)} s`;
-
+      if (timeEl) timeEl.textContent = timeStr;
       const metricEl = document.getElementById(`kf-metrics-${k}`);
-      if (metricEl) {
-        const vMag = Math.hypot(f.comVx, f.comVy).toFixed(1);
-        if (f.fzTotal > 0.1) {
-          metricEl.textContent = `v = ${vMag} m/s · GRF = ${f.fzTotal.toFixed(1)} kN`;
-        } else {
-          metricEl.textContent = `v = ${vMag} m/s · Alt = ${Math.max(0, f.comY).toFixed(2)} m`;
-        }
-      }
+      if (metricEl) metricEl.textContent = metricStr;
 
-      // Render mini-canvas
+      // Update Step 3 Analysis text readouts
+      const timeAnalysisEl = document.getElementById(`kf-analysis-time-${k}`);
+      if (timeAnalysisEl) timeAnalysisEl.textContent = timeStr;
+      const metricAnalysisEl = document.getElementById(`kf-analysis-metric-${k}`);
+      if (metricAnalysisEl) metricAnalysisEl.textContent = metricStr;
+
+      // Render Step 2 mini-canvas
       const canvas = document.getElementById(`canvas-kf-${k}`);
       if (canvas) {
         renderMiniKeyframeCanvas(canvas, f, k);
+      }
+
+      // Render Step 3 Analysis mini-canvas
+      const canvasAnalysis = document.getElementById(`kf-analysis-canvas-${k}`);
+      if (canvasAnalysis) {
+        renderMiniKeyframeCanvas(canvasAnalysis, f, k);
       }
     }
   }
@@ -1905,8 +1928,10 @@
     }
 
     const cards = document.querySelectorAll('.keyframe-card');
-    cards.forEach((card, idx) => {
-      if (idx === activeIdx) {
+    cards.forEach(card => {
+      const idxAttr = card.dataset.analysisKfIdx != null ? card.dataset.analysisKfIdx : card.dataset.keyframeIdx;
+      const cardIdx = parseInt(idxAttr, 10);
+      if (cardIdx === activeIdx) {
         card.classList.add('active-phase');
       } else {
         card.classList.remove('active-phase');
@@ -1917,8 +1942,9 @@
   function initKeyframeFilmstripEvents() {
     const cards = document.querySelectorAll('.keyframe-card');
     cards.forEach(card => {
-      card.addEventListener('click', () => {
-        const kfIdx = parseInt(card.dataset.keyframeIdx, 10);
+      const handleSelect = () => {
+        const idxAttr = card.dataset.analysisKfIdx != null ? card.dataset.analysisKfIdx : card.dataset.keyframeIdx;
+        const kfIdx = parseInt(idxAttr, 10);
         if (isNaN(kfIdx) || !state.playback.keyframeIndices) return;
 
         const targetFrameIdx = state.playback.keyframeIndices[kfIdx];
@@ -1936,12 +1962,18 @@
 
         renderSimulationCanvas();
         updateKeyframeHighlight();
-      });
 
+        if (card.classList.contains('analysis-keyframe-card')) {
+          card.classList.add('pulse-selected');
+          setTimeout(() => card.classList.remove('pulse-selected'), 500);
+        }
+      };
+
+      card.addEventListener('click', handleSelect);
       card.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          card.click();
+          handleSelect();
         }
       });
     });
@@ -2418,6 +2450,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2471,6 +2504,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2524,6 +2558,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2594,6 +2629,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2705,6 +2741,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2760,6 +2797,7 @@
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -2865,6 +2903,596 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  // ==========================================================================
+  // 12b. COMPREHENSIVE FORENSIC BIOMECHANICS PDF REPORT EXPORTER (jsPDF)
+  //      Strictly NO HTML tables: Pure Vector Cards, Progress Bars,
+  //      Badges, and High-Resolution 1000 Hz Telemetry & Heat-Map Canvases
+  // ==========================================================================
+  async function exportForensicReportPDF() {
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      alert('The jsPDF library is loading or could not be loaded. Please ensure an active internet connection.');
+      return;
+    }
+
+    // Ensure simulation data is available
+    if (!state.simResult) {
+      runFullSimulation();
+    }
+
+    const sim = state.simResult;
+    if (!sim) {
+      alert('Unable to generate report: simulation data unavailable.');
+      return;
+    }
+
+    const p = state.params;
+    const sum = sim.summary;
+    const segs = sim.segmentResults || [];
+    const frames = sim.frames || [];
+
+    // Visual button feedback
+    const exportBtns = [dom.btnExportPdf, dom.btnExportPdfFooter, dom.btnExportPdfHeader].filter(Boolean);
+    exportBtns.forEach(btn => {
+      btn.dataset.prevHtml = btn.innerHTML;
+      btn.classList.add('btn-exporting');
+      btn.innerHTML = '<span>⏳</span> Generating PDF Report...';
+    });
+
+    // Make sure panel-analysis is measurable so high-DPI charts render crisply
+    const panel = document.getElementById('panel-analysis');
+    const wasHidden = panel && !panel.classList.contains('active');
+    const origStyle = {
+      display: panel ? panel.style.display : '',
+      visibility: panel ? panel.style.visibility : '',
+      position: panel ? panel.style.position : '',
+      top: panel ? panel.style.top : '',
+      left: panel ? panel.style.left : '',
+      width: panel ? panel.style.width : ''
+    };
+
+    if (wasHidden && panel) {
+      panel.style.display = 'block';
+      panel.style.visibility = 'hidden';
+      panel.style.position = 'absolute';
+      panel.style.top = '-9999px';
+      panel.style.left = '-9999px';
+      panel.style.width = '1200px';
+    }
+
+    try {
+      // Force render all filmstrips, maps, and charts synchronously
+      renderKeyframeFilmstrip();
+      renderInjuryMapCanvas();
+      updateAnalysisCharts();
+
+      // Brief delay to ensure Chart.js / canvas paint buffer completes
+      await new Promise(resolve => setTimeout(resolve, 80));
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      // Canvas image helper
+      const getImg = canvasEl => {
+        if (!canvasEl) return null;
+        try {
+          if (canvasEl.width > 0 && canvasEl.height > 0) {
+            return canvasEl.toDataURL('image/png', 1.0);
+          }
+        } catch (e) {
+          console.warn('Canvas image export warning:', e);
+        }
+        return null;
+      };
+
+      // Vector drawing helpers (Strictly NO tables!)
+      const drawCard = (x, y, w, h, r = 1.5, bg = [248, 250, 252], border = [226, 232, 240]) => {
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.setDrawColor(border[0], border[1], border[2]);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(x, y, w, h, r, r, 'FD');
+      };
+
+      const drawBadge = (x, y, w, h, text, status) => {
+        let bg = [16, 185, 129]; // safe green
+        if (status === 'fracture') bg = [239, 68, 68]; // red
+        else if (status === 'micro') bg = [245, 158, 11]; // amber
+        else if (status === 'info') bg = [2, 132, 199]; // blue
+        else if (status === 'slate') bg = [51, 65, 85];
+
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.roundedRect(x, y, w, h, 0.8, 0.8, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.text(text, x + w * 0.5, y + h * 0.72, { align: 'center' });
+      };
+
+      const drawProgressBar = (x, y, w, h, ratio, status) => {
+        doc.setFillColor(226, 232, 240);
+        doc.roundedRect(x, y, w, h, 0.8, 0.8, 'F');
+
+        let fill = [16, 185, 129];
+        if (status === 'fracture') fill = [239, 68, 68];
+        else if (status === 'micro') fill = [245, 158, 11];
+
+        const fillW = Math.min(w, Math.max(0.6, w * Math.min(1.0, ratio)));
+        doc.setFillColor(fill[0], fill[1], fill[2]);
+        doc.roundedRect(x, y, fillW, h, 0.8, 0.8, 'F');
+      };
+
+      // ======================================================================
+      // PAGE 1 — EXECUTIVE FORENSIC & TELEMETRY REPORT
+      // ======================================================================
+
+      // 1. Dark Slate Header Banner
+      doc.setFillColor(15, 23, 42);
+      doc.roundedRect(12, 10, 186, 18, 2, 2, 'F');
+      doc.setFillColor(14, 165, 233);
+      doc.rect(12, 10, 186, 1.2, 'F');
+
+      doc.setTextColor(148, 163, 184);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.0);
+      doc.text('LTU EXPERIMENTAL BIOMECHANICS LAB  ·  MSU FORENSIC ANTHROPOLOGY', 16, 15.5);
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Multi-Body Dynamics Fall Reconstruction & Trauma Analysis Report', 16, 21.5);
+
+      doc.setTextColor(148, 163, 184);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      const timestampStr = new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString();
+      doc.text(`Generated: ${timestampStr}  |  Simulation ID: MBD-FALL-H${p.height.toFixed(1)}M`, 194, 21.5, { align: 'right' });
+
+      // 2. Section 1: Scenario & Anthropometric Parameters
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.0);
+      doc.text('1. SCENARIO & ANTHROPOMETRIC PARAMETERS (VISUAL METRIC CARDS)', 12, 32.5);
+
+      const pCards = [
+        { label: 'FALL HEIGHT (h)', val: `${p.height.toFixed(1)} m  (${(p.height * 3.28084).toFixed(1)} ft)`, sub: 'Elevated release height' },
+        { label: 'LAUNCH PITCH (θ₀)', val: `${p.angleDeg >= 0 ? '+' : ''}${p.angleDeg}°`, sub: p.angleDeg === 0 ? 'Pure vertical release' : (p.angleDeg > 0 ? 'Forward pitch tilt' : 'Backward pitch tilt') },
+        { label: 'INITIAL VELOCITIES', val: `vx:${p.vx.toFixed(1)} vy:${p.vy.toFixed(1)} m/s`, sub: `ω₀ = ${p.omegaDeg}°/s (${(p.omegaDeg * Math.PI / 180).toFixed(2)} rad/s)` },
+        { label: 'SUBJECT ANTHROPOMETRY', val: `${p.mass} kg  ·  ${(p.stature * 100).toFixed(0)} cm`, sub: `Body Mass Index = ${(p.mass / (p.stature * p.stature)).toFixed(1)}` },
+        { label: 'BRACING REFLEX TONE', val: `${Math.round(p.bracing * 100)}% Reflex Tone`, sub: p.bracing >= 0.6 ? 'Tensed defensive posture' : (p.bracing >= 0.3 ? 'Moderate neuromuscular tone' : 'Flaccid / unbraced posture') },
+        { label: 'IMPACT SUBSTRATE', val: `${p.surface.toUpperCase()}`, sub: `k = ${p.stiffness} kN/m  ·  c = ${p.damping} Ns/m` },
+        { label: 'BONE TOLERANCE INDEX (τ)', val: `τ = ${p.tolerance.toFixed(2)}`, sub: p.tolerance >= 1.0 ? 'Normal young bone mineral density' : (p.tolerance >= 0.7 ? 'Mild osteopenia' : 'Severe osteoporotic fragility') },
+        { label: 'TOTAL SYSTEM ENERGY', val: `${Math.round(p.mass * 9.81 * p.height).toLocaleString()} Joules`, sub: 'Gravitational potential energy Ep' }
+      ];
+
+      const cW = 44.25;
+      const cH = 13.5;
+      const gap = 3.0;
+
+      for (let i = 0; i < 8; i++) {
+        const row = Math.floor(i / 4);
+        const col = i % 4;
+        const cx = 12 + col * (cW + gap);
+        const cy = 35 + row * (cH + 2.5);
+        drawCard(cx, cy, cW, cH, 1.5, [248, 250, 252], [226, 232, 240]);
+
+        doc.setTextColor(100, 116, 139);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.text(pCards[i].label, cx + 2.5, cy + 4);
+
+        doc.setTextColor(15, 23, 42);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.text(pCards[i].val, cx + 2.5, cy + 8.2);
+
+        doc.setTextColor(148, 163, 184);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.0);
+        doc.text(pCards[i].sub, cx + 2.5, cy + 11.5);
+      }
+
+      // 3. Section 2: Executive Biomechanical & Differential Diagnosis Summary
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.0);
+      doc.text('2. EXECUTIVE BIOMECHANICAL & DIFFERENTIAL DIAGNOSIS SUMMARY', 12, 68);
+
+      const boxY = 70.5;
+      const boxH = 32.5;
+      drawCard(12, boxY, 186, boxH, 2, [240, 249, 255], [186, 230, 253]);
+
+      // Box banner ribbon
+      doc.setFillColor(224, 242, 254);
+      doc.roundedRect(12, boxY, 186, 6.0, 1.5, 1.5, 'F');
+      doc.setTextColor(3, 105, 161);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+
+      const regimeText = sum.injuryRegime === 'regime-local'
+        ? 'FALL INJURY REGIME: REGIME I · LOCALIZED EXTREMITY TRAUMA (1–3 m)'
+        : (sum.injuryRegime === 'regime-axial'
+          ? 'FALL INJURY REGIME: REGIME II · AXIAL DECELERATION & BIMODAL BIFURCATION (3–12 m)'
+          : 'FALL INJURY REGIME: REGIME III · CATASTROPHIC MULTI-ORGAN POLYTRAUMA (12–30+ m)');
+      doc.text(regimeText, 16, boxY + 4.2);
+
+      const aisSeverityStr = sum.fractureCount >= 3 ? 'AIS 4–5 (Critical Polytrauma)' : (sum.fractureCount >= 1 ? 'AIS 2–3 (Moderate-Severe)' : 'AIS 1 (Minor)');
+      doc.text(`Severity: ${aisSeverityStr}  ·  Estimated Mortality: ${sum.overallMortalityRisk}%`, 194, boxY + 4.2, { align: 'right' });
+
+      // Left Column Metrics
+      const bwFactor = (sum.peakGRF_KN / (p.mass * 9.81 / 1000)).toFixed(1);
+      const hicSeverity = sum.hic15 >= 1000 ? 'Severe TBI Risk' : (sum.hic15 >= 500 ? 'Moderate Concussion' : 'Sub-Threshold');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.2);
+      doc.setTextColor(15, 23, 42);
+      doc.text('Impact Velocity:', 16, boxY + 11.5);
+      doc.text('Flight Duration:', 16, boxY + 16.5);
+      doc.text('Peak Normal GRF:', 16, boxY + 21.5);
+      doc.text('Head Accel & HIC₁₅:', 16, boxY + 26.5);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85);
+      doc.text(`${sum.impactVelocityMS.toFixed(2)} m/s  (${(sum.impactVelocityMS * 3.6).toFixed(1)} km/h)`, 44, boxY + 11.5);
+      doc.text(`${sum.flightTimeS.toFixed(3)} s  (Touchdown at t = ${sum.flightTimeS.toFixed(3)} s)`, 44, boxY + 16.5);
+      doc.text(`${sum.peakGRF_KN.toFixed(2)} kN  (${bwFactor} × Body Weight)`, 44, boxY + 21.5);
+      doc.text(`Peak ${sum.peakHeadG.toFixed(1)} g  |  HIC₁₅ = ${sum.hic15.toFixed(0)} (${hicSeverity})`, 44, boxY + 26.5);
+
+      // Right Column Metrics
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('Primary Impact Locus:', 104, boxY + 11.5);
+      doc.text('Secondary Deceleration:', 104, boxY + 16.5);
+      doc.text('Fractures Predicted:', 104, boxY + 21.5);
+      doc.text('Hat Brim Line Finding:', 104, boxY + 26.5);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85);
+      doc.text(`${sum.primaryImpactSegment}`, 138, boxY + 11.5);
+      doc.text(`${sum.secondaryImpactSegment}`, 138, boxY + 16.5);
+      doc.text(`${sum.fractureCount} of 9 segments fractured (${segs.filter(s => s.status === 'micro').length} micro-yield)`, 138, boxY + 21.5);
+
+      const hblShort = doc.splitTextToSize(sum.hatBrimLineAssessment, 56);
+      doc.setFontSize(5.2);
+      doc.text(hblShort[0] || 'Axial Sparing', 138, boxY + 26.5);
+
+      // 4. Section 3: 5-Phase Keyframe Posture Summary Strip
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.0);
+      doc.text('3. 5-PHASE FALL KINEMATICS & SKELETAL POSTURE SUMMARY FILMSTRIP', 12, 107.5);
+
+      const kfY = 110.0;
+      const kfCardW = 35.2;
+      const kfCardH = 34.5;
+      const kfGap = 2.5;
+      const phaseNames = [
+        'Phase 1 · Launch',
+        'Phase 2 · Mid-Flight',
+        'Phase 3 · Touchdown',
+        'Phase 4 · Peak GRF',
+        'Phase 5 · Final Rest'
+      ];
+
+      for (let k = 0; k < 5; k++) {
+        const kx = 12 + k * (kfCardW + kfGap);
+        drawCard(kx, kfY, kfCardW, kfCardH, 1.5, [255, 255, 255], [203, 213, 225]);
+
+        const fIdx = state.playback.keyframeIndices ? state.playback.keyframeIndices[k] : 0;
+        const f = frames[fIdx] || frames[0] || { t: 0, comVx: 0, comVy: 0, comY: 0, fzTotal: 0 };
+
+        // Embed mini-canvas
+        const kfCanvas = document.getElementById(`kf-analysis-canvas-${k}`) || document.getElementById(`canvas-kf-${k}`);
+        const kfImg = getImg(kfCanvas);
+        if (kfImg) {
+          doc.addImage(kfImg, 'PNG', kx + 1, kfY + 1, kfCardW - 2, 20.75);
+        } else {
+          doc.setFillColor(15, 23, 42);
+          doc.rect(kx + 1, kfY + 1, kfCardW - 2, 20.75, 'F');
+        }
+
+        // Phase Title
+        doc.setTextColor(15, 23, 42);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.2);
+        doc.text(phaseNames[k], kx + 2, kfY + 24.5);
+
+        // Timestamp
+        doc.setTextColor(2, 132, 199);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.8);
+        doc.text(`t = ${f.t.toFixed(3)} s`, kx + 2, kfY + 28.0);
+
+        // Instantaneous metrics
+        doc.setTextColor(100, 116, 139);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.0);
+        const vMag = Math.hypot(f.comVx, f.comVy).toFixed(1);
+        const metricLine = f.fzTotal > 0.1
+          ? `v=${vMag} m/s · GRF=${f.fzTotal.toFixed(1)} kN`
+          : `v=${vMag} m/s · Alt=${Math.max(0, f.comY).toFixed(2)} m`;
+        doc.text(metricLine, kx + 2, kfY + 31.5);
+      }
+
+      // 5. Section 4: Multi-Channel Time-Series Telemetry Graphs (2x2 Grid)
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.0);
+      doc.text('4. MULTI-CHANNEL TIME-SERIES KINEMATIC & KINETIC TELEMETRY (1000 Hz SAMPLING)', 12, 149.0);
+
+      const chW = 91.0;
+      const chH = 46.5;
+      const chGapX = 4.0;
+      const chGapY = 3.5;
+
+      const chartList = [
+        { canvas: dom.chartGrf, title: 'Ground Reaction Force (GRF Fz & Fx vs Time)', x: 12, y: 152.0 },
+        { canvas: dom.chartSegments, title: 'Segmental Peak Force vs Fracture Yield Limits', x: 12 + chW + chGapX, y: 152.0 },
+        { canvas: dom.chartHeadSpine, title: 'Head Accel Pulse (g) & Spine Axial Load (kN)', x: 12, y: 152.0 + chH + chGapY },
+        { canvas: dom.chartEnergy, title: 'System Energy Partitioning (Ek, Ep, Dissipated J)', x: 12 + chW + chGapX, y: 152.0 + chH + chGapY }
+      ];
+
+      chartList.forEach(item => {
+        drawCard(item.x, item.y, chW, chH, 1.5, [255, 255, 255], [226, 232, 240]);
+        const img = getImg(item.canvas);
+        if (img) {
+          doc.addImage(img, 'PNG', item.x + 0.5, item.y + 0.5, chW - 1, chH - 1);
+        } else {
+          doc.setTextColor(148, 163, 184);
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(7.0);
+          doc.text(`[${item.title}]`, item.x + chW * 0.5, item.y + chH * 0.5, { align: 'center' });
+        }
+      });
+
+      // Page 1 Footer
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.4);
+      doc.line(12, 286, 198, 286);
+
+      doc.setTextColor(100, 116, 139);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.text('Lawrence Technological University · Experimental Biomechanics Laboratory · https://ltuebl.github.io/', 12, 290.5);
+      doc.text('Page 1 of 2  ·  Forensic Multi-Body Fall Simulation Report', 198, 290.5, { align: 'right' });
+
+      // ======================================================================
+      // PAGE 2 — ANATOMICAL TRAUMA HEAT-MAP & SEGMENTAL FRACTURE DIAGNOSTICS
+      // ======================================================================
+      doc.addPage();
+
+      // Page 2 Header Banner
+      doc.setFillColor(15, 23, 42);
+      doc.roundedRect(12, 10, 186, 15.5, 2, 2, 'F');
+      doc.setFillColor(14, 165, 233);
+      doc.rect(12, 10, 186, 1.2, 'F');
+
+      doc.setTextColor(148, 163, 184);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+      doc.text('LTU EXPERIMENTAL BIOMECHANICS LAB  ·  MSU FORENSIC ANTHROPOLOGY', 16, 15.0);
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.text('Anatomical Skeletal Trauma Heat-Map & Segmental Fracture Diagnostics', 16, 20.5);
+
+      doc.setTextColor(148, 163, 184);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.2);
+      doc.text('Regional Stress Attenuation, AIS PMHS Fracture Thresholds & Morphology Assessment', 194, 20.5, { align: 'right' });
+
+      // Section 5: Anatomical Trauma Heat-Map & Differential Findings
+      const topAreaY = 28.5;
+      const topAreaH = 68.0;
+
+      // Top Left: Skeletal Heat-Map Container
+      const mapBoxW = 88.0;
+      drawCard(12, topAreaY, mapBoxW, topAreaH, 2, [248, 250, 252], [226, 232, 240]);
+
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.0);
+      doc.text('FULL-BODY SKELETAL STRESS ATTENUATION MAP', 16, topAreaY + 5.0);
+
+      const injuryMapImg = getImg(dom.canvasInjuryMap);
+      if (injuryMapImg) {
+        doc.addImage(injuryMapImg, 'PNG', 14, topAreaY + 7.0, mapBoxW - 4, 43.0);
+      } else {
+        doc.setFillColor(15, 23, 42);
+        doc.rect(14, topAreaY + 7.0, mapBoxW - 4, 43.0, 'F');
+      }
+
+      // Legend
+      const legY = topAreaY + 53.5;
+      doc.setFillColor(16, 185, 129);
+      doc.rect(16, legY, 3, 3, 'F');
+      doc.setTextColor(51, 65, 85);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.text('Intact (< 70% Yield)', 21, legY + 2.5);
+
+      doc.setFillColor(245, 158, 11);
+      doc.rect(46, legY, 3, 3, 'F');
+      doc.text('Microdamage (70–99%)', 51, legY + 2.5);
+
+      doc.setFillColor(239, 68, 68);
+      doc.rect(16, legY + 5, 3, 3, 'F');
+      doc.text('Fracture (≥ 100% Yield)', 21, legY + 7.5);
+
+      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(4.8);
+      doc.text('Dynamic load attenuation modeled via multi-segment joint compliance', 46, legY + 7.5);
+
+      // Top Right: Forensic Anthropology Differential Diagnosis & HBL Box
+      const anthroBoxW = 94.0;
+      const anthroBoxX = 104.0;
+      drawCard(anthroBoxX, topAreaY, anthroBoxW, topAreaH, 2, [255, 255, 255], [226, 232, 240]);
+
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.2);
+      doc.text('FORENSIC ANTHROPOLOGY DIFFERENTIAL DIAGNOSIS', anthroBoxX + 4, topAreaY + 5.0);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.0);
+      doc.setTextColor(30, 41, 59);
+      doc.text('• Primary Impact Vector:', anthroBoxX + 4, topAreaY + 10.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`${sum.primaryImpactSegment} (direct ground contact dissipation)`, anthroBoxX + 33, topAreaY + 10.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text('• Secondary Deceleration:', anthroBoxX + 4, topAreaY + 15.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`${sum.secondaryImpactSegment} (inertial rotational slap / rebound)`, anthroBoxX + 34, topAreaY + 15.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text('• Hat Brim Line (HBL) Rule Evaluation:', anthroBoxX + 4, topAreaY + 21.0);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(51, 65, 85);
+      const hblFullLines = doc.splitTextToSize(sum.hatBrimLineAssessment, anthroBoxW - 8);
+      doc.text(hblFullLines, anthroBoxX + 4, topAreaY + 25.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.0);
+      doc.setTextColor(30, 41, 59);
+      doc.text('• Skeletal Fracture Yield Summary:', anthroBoxX + 4, topAreaY + 52.0);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`${sum.fractureCount} structural fractures, ${segs.filter(s => s.status === 'micro').length} microdamage segments predicted`, anthroBoxX + 4, topAreaY + 56.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text('• Forensic Polytrauma Index:', anthroBoxX + 4, topAreaY + 62.0);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Maximum AIS = ${sum.fractureCount >= 3 ? '4–5 (Severe/Critical)' : (sum.fractureCount >= 1 ? '2–3 (Moderate)' : '1 (Minor)')} · Overall Mortality Risk = ${sum.overallMortalityRisk}%`, anthroBoxX + 4, topAreaY + 66.0);
+
+      // Bottom Area: 9 Segmental Diagnostic Cards (Strictly NO Tables!)
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.0);
+      doc.text('DETAILED SEGMENTAL FRACTURE DIAGNOSTICS (ALL 9 ANATOMICAL REGIONS — NO TABLES)', 12, 101.5);
+
+      const gridY = 104.5;
+      const segCardW = 59.6;
+      const segCardH = 55.5;
+      const segGapX = 3.6;
+      const segGapY = 3.5;
+
+      for (let idx = 0; idx < segs.length && idx < 9; idx++) {
+        const row = Math.floor(idx / 3);
+        const col = idx % 3;
+        const sx = 12 + col * (segCardW + segGapX);
+        const sy = gridY + row * (segCardH + segGapY);
+        const seg = segs[idx];
+
+        let borderColor = [16, 185, 129];
+        let statusBadgeText = 'SAFE';
+        if (seg.status === 'fracture') {
+          borderColor = [239, 68, 68];
+          statusBadgeText = 'FRACTURE';
+        } else if (seg.status === 'micro') {
+          borderColor = [245, 158, 11];
+          statusBadgeText = 'MICRO';
+        }
+
+        drawCard(sx, sy, segCardW, segCardH, 1.5, [255, 255, 255], borderColor);
+
+        // Top accent strip
+        doc.setFillColor(borderColor[0], borderColor[1], borderColor[2]);
+        doc.rect(sx, sy, segCardW, 1.0, 'F');
+
+        // Segment Name
+        doc.setTextColor(15, 23, 42);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.8);
+        doc.text(seg.name, sx + 2.5, sy + 5.5);
+
+        // Status Badge
+        drawBadge(sx + segCardW - 17.5, sy + 2.2, 15.0, 4.0, statusBadgeText, seg.status);
+
+        // Peak Load vs Tolerance
+        doc.setTextColor(51, 65, 85);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.8);
+        doc.text(`Peak Load: ${seg.peakLoadKN.toFixed(2)} kN  /  Tol: ${seg.toleranceKN.toFixed(2)} kN`, sx + 2.5, sy + 10.5);
+
+        // Stress Ratio & Risk
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Stress Ratio: ${seg.fractureIndex.toFixed(2)}  ·  Risk: ${seg.riskPercent.toFixed(1)}%`, sx + 2.5, sy + 14.5);
+
+        // Visual Progress Bar
+        drawProgressBar(sx + 2.5, sy + 17.0, segCardW - 5.0, 2.4, seg.fractureIndex, seg.status);
+
+        // Mechanism
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.0);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Mechanism: ', sx + 2.5, sy + 23.0);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        const mechLines = doc.splitTextToSize(seg.mechanism, segCardW - 16.0);
+        doc.text(mechLines, sx + 15.5, sy + 23.0);
+
+        // Forensic Morphology
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.0);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Forensic Morphology: ', sx + 2.5, sy + 31.0);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        const morphLines = doc.splitTextToSize(seg.forensicMorphology, segCardW - 5.0);
+        doc.text(morphLines, sx + 2.5, sy + 35.0);
+      }
+
+      // Page 2 Footer
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.4);
+      doc.line(12, 286, 198, 286);
+
+      doc.setTextColor(100, 116, 139);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.text('Lawrence Technological University · Experimental Biomechanics Laboratory · https://ltuebl.github.io/ · MSU Forensic Anthropology', 12, 290.0);
+      doc.text('Refs: Cross et al. (Forensic Sci Int 2021); Cartales & Meyer (MSU/LTU EBL); Petrone et al. (2020); NHTSA HIC15', 12, 293.0);
+      doc.setFontSize(6.5);
+      doc.text('Page 2 of 2  ·  Forensic Multi-Body Fall Simulation Report', 198, 290.5, { align: 'right' });
+
+      // Save PDF file
+      doc.save(`LTU_EBL_Forensic_Fall_Report_h${p.height}m.pdf`);
+
+    } catch (err) {
+      console.error('Failed to generate Forensic PDF report:', err);
+      alert('Error generating Forensic Biomechanics PDF report: ' + err.message);
+    } finally {
+      // Restore panel styling if it was temporarily shown for layout measurement
+      if (wasHidden && panel) {
+        panel.style.display = origStyle.display;
+        panel.style.visibility = origStyle.visibility;
+        panel.style.position = origStyle.position;
+        panel.style.top = origStyle.top;
+        panel.style.left = origStyle.left;
+        panel.style.width = origStyle.width;
+      }
+
+      // Restore button text
+      exportBtns.forEach(btn => {
+        btn.classList.remove('btn-exporting');
+        if (btn.dataset.prevHtml) btn.innerHTML = btn.dataset.prevHtml;
+      });
+    }
   }
 
   // ==========================================================================
@@ -3289,7 +3917,11 @@
       });
     }
 
-    // 8. Header Global Actions
+    // 8. Header Global Actions & Report Exporters
+    [dom.btnExportPdf, dom.btnExportPdfFooter, dom.btnExportPdfHeader].forEach(btn => {
+      if (btn) btn.addEventListener('click', exportForensicReportPDF);
+    });
+
     if (dom.btnExportCsv) {
       dom.btnExportCsv.addEventListener('click', exportSimulationCsv);
     }
@@ -3365,7 +3997,8 @@
     switchTab,
     applyPreset,
     runFullSimulation,
-    exportSimulationCsv
+    exportSimulationCsv,
+    exportForensicReportPDF
   };
 
 })();

@@ -815,7 +815,6 @@
     let pelvisTheta = contactTheta;
     let omega = omega0;
     const q = { ...q0 };
-    let reboundDecay = 1.0;
 
     const yTouchdown = contactCoMY;
 
@@ -863,6 +862,8 @@
 
       let stepFzTotal = 0;
       let stepFxTotal = 0;
+      let dynamicPulseN = 0;
+      let secPulseN = 0;
       const contactFn = {};
       const contactFt = {};
       for (const k of Object.keys(curNodes)) {
@@ -870,7 +871,8 @@
         contactFt[k] = 0;
       }
 
-      const isContact = (maxNodeDepth > 0 || minNodeBot <= 0);
+      const tSinceContact = step * dt;
+      const isContact = (maxNodeDepth > 0 || minNodeBot <= 0 || step > 0);
 
       if (isContact) {
         // Effective series contact compliance:
@@ -879,25 +881,28 @@
         const kBody = isExtremity ? (28 + 18 * B) * (p.mass / 75) : 95 * (p.mass / 75);
         const kEff = (kSurf * kBody) / (kSurf + kBody); // kN/m
 
-        const comp = Math.max(0, yTouchdown - comY);
-        const effComp = Math.max(maxNodeDepth, comp);
+        // 1. Static Body-Weight Support Force (ramps smoothly to 1.00 * BW over initial contact)
+        const weightSupportN = totalMass * g * (1 - Math.exp(-tSinceContact / 0.012));
 
-        const kSpr = kEff * 1000 * 0.26;
-        const cDamp = 1250 * Math.sqrt(kEff / 37.0) * (p.mass / 75);
+        // 2. Primary Dynamic Deceleration Pulse
+        const vDown = Math.max(0, -comVy);
+        // Smooth rise envelope over initial compression (tau_rise depends on surface & joint stiffness)
+        const tauRise = Math.max(0.006, Math.min(0.035, 0.22 / Math.sqrt(kEff)));
+        const riseEnv = Math.pow(tSinceContact / tauRise, 1.25) * Math.exp(1.25 * (1 - tSinceContact / tauRise));
+        // Calibrate peak dynamic force magnitude to match biomechanical impact velocity and kEff
+        const vImpactAbs = Math.abs(contactVy);
+        const peakDynN = (kEff * 1000 * 0.018 * Math.pow(vImpactAbs, 1.18) + 210 * Math.pow(vImpactAbs, 1.25)) * (totalMass / 75) * 0.78;
+        dynamicPulseN = peakDynN * riseEnv * Math.pow(vDown / Math.max(0.5, vImpactAbs), 0.35);
 
-        if (comVy < 0) {
-          // On downward compression: viscoelastic spring + damper proportional to kEff and velocity
-          const vDown = -comVy;
-          stepFzTotal = kSpr * Math.pow(effComp, 1.10) + cDamp * Math.pow(effComp, 0.38) * Math.pow(vDown, 1.08);
-        } else {
-          // On upward rebound: clamp upward velocity and rapidly decay contact force (restitution e < 0.08)
-          reboundDecay *= Math.max(0, 1 - 40 * dt);
-          stepFzTotal = Math.max(0, kSpr * 0.05 * Math.pow(effComp, 1.10) - cDamp * 0.10 * comVy) * reboundDecay;
-          if (Math.abs(comVy) < 0.15) {
-            stepFzTotal = Math.max(stepFzTotal, totalMass * g * (1 - reboundDecay));
-          }
+        // 3. Secondary Segment Impact Pulse (tumbling/pitching or high fall secondary wave)
+        const hasSecondary = (p.height >= 3.0 && Math.abs(contactTheta) > 0.20 && Math.abs(omega0) > 0.30) || (p.height >= 12.0);
+        if (hasSecondary) {
+          const tSecOffset = Math.max(0.045, Math.min(0.14, 0.11 / Math.max(0.5, Math.abs(omega0) + 0.8)));
+          const secPeakN = peakDynN * (0.35 + 0.15 * Math.min(1.0, Math.abs(omega0) / 1.5));
+          secPulseN = secPeakN * Math.exp(-0.5 * Math.pow((tSinceContact - tSecOffset) / 0.014, 2));
         }
-        if (stepFzTotal < 0) stepFzTotal = 0;
+
+        stepFzTotal = Math.max(0, weightSupportN + dynamicPulseN + secPulseN);
 
         // Distribute vertical Ground Reaction Force among contacting nodes
         let sumW = 0;
@@ -1002,13 +1007,20 @@
         }
       }
 
-      // Head resultant acceleration (in g)
-      const fHeadNet = Math.sqrt(
-        Math.pow(contactFt.headTop + contactFt.headCenter, 2) +
-        Math.pow(contactFn.headTop + contactFn.headCenter + neckAxial * 1000 * 0.40, 2)
+      // Head resultant acceleration (in g): smooth dynamic impact acceleration + 1.0 g static gravity
+      const dynamicGRF = dynamicPulseN + secPulseN;
+      const dynRatio = stepFzTotal > 0 ? (dynamicGRF / stepFzTotal) : 0;
+      const headDynFn = (contactFn.headTop + contactFn.headCenter) * dynRatio;
+      const headDynFt = (contactFt.headTop + contactFt.headCenter) * dynRatio;
+      const dynBodyDecel = dynamicGRF / totalMass;
+      const neckAxialDynN = (nodeMasses.headCenter + nodeMasses.headTop) * dynBodyDecel * 0.40;
+
+      const fHeadDynNet = Math.sqrt(
+        Math.pow(headDynFt, 2) +
+        Math.pow(headDynFn + neckAxialDynN, 2)
       );
       const headM = nodeMasses.headCenter + nodeMasses.headTop;
-      const headAccG = fHeadNet / (headM * g);
+      const headAccG = 1.0 + fHeadDynNet / (headM * g);
       headAccGList.push(headAccG);
 
       // 5. Biofidelic Joint Flexion & Secondary Body Folding
@@ -1070,11 +1082,8 @@
       comVy += comAy * dt;
       comVx += comAx * dt;
 
-      // Rebound clamping
-      if (comVy > 0.25) comVy = 0.25;
-      if (minNodeBot <= 0.005 && Math.abs(comVy) < 0.15 && stepFzTotal > totalMass * g * 0.5) {
-        comVy *= 0.90;
-      }
+      // Inelastic human postural settling: no upward bounce
+      if (comVy > 0) comVy = 0;
 
       comY += comVy * dt;
       comX += comVx * dt;
@@ -1286,12 +1295,12 @@
     };
 
     // 8. Keyframes Export: 5 key phase snapshots across the fall event
-    let peakGRFTimeS = flightTimeS;
-    let maxFzFound = 0;
+    let peakFrame = frames[0];
+    let maxFzFound = -1;
     for (const f of frames) {
       if (f.fzTotal > maxFzFound) {
         maxFzFound = f.fzTotal;
-        peakGRFTimeS = f.t;
+        peakFrame = f;
       }
     }
 
@@ -1331,7 +1340,7 @@
         phase: 'peak_grf',
         label: 'Peak GRF Deceleration',
         description: 'Maximum ground reaction force & peak deceleration',
-        ...findClosestFrame(peakGRFTimeS)
+        ...peakFrame
       },
       {
         phase: 'final_resting',

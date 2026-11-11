@@ -18,6 +18,9 @@
   <!-- Chart.js v4.4.1 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
+  <!-- jsPDF v2.5.1 for Multi-Page Publication-Grade Forensic PDF Reports -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
   <!-- Application Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
@@ -45,6 +48,9 @@
       </button>
       <button id="btn-quiz" class="btn btn-secondary btn-sm" title="Forensic Anthropology Fall Trajectory Case Quiz">
         <span>🎓</span> Forensic Quiz
+      </button>
+      <button id="btn-export-pdf-header" class="btn btn-primary btn-sm" title="Export Comprehensive Forensic Biomechanics Report to PDF">
+        <span>📄</span> Export PDF Report
       </button>
       <button id="btn-export-csv" class="btn btn-outline btn-sm" title="Export High-Resolution Kinematic & GRF Data to CSV">
         <span>📥</span> Export CSV
@@ -617,6 +623,11 @@
               <h2><span>💀</span> Forensic Skeletal Trauma &amp; Stress Attenuation Map</h2>
               <span class="panel-subtitle">Direct Impact vs. Secondary Deceleration Fractures · Biomechanical Load Path</span>
             </div>
+            <div class="panel-header-actions">
+              <button id="btn-export-pdf" class="btn btn-primary btn-sm" title="Export Comprehensive Multi-Page Forensic Biomechanics Report to PDF">
+                <span>📄</span> Export Forensic Report (.pdf)
+              </button>
+            </div>
           </div>
           <div class="panel-body">
 
@@ -799,9 +810,14 @@
               </div>
             </div>
 
-            <button id="btn-nav-fwd-to-sweep" class="btn btn-primary btn-next-step">
-              <span>📊</span> Proceed to Multi-Height Bimodal Sweep (Step 4) →
-            </button>
+            <div class="step-nav-row" style="display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; margin-top: 1rem; flex-wrap: wrap;">
+              <button id="btn-export-pdf-footer" class="btn btn-outline" style="border-color: var(--color-primary); color: var(--color-primary-dark); font-weight: 600;" title="Export Comprehensive Multi-Page Forensic Biomechanics Report to PDF">
+                <span>📄</span> Export Forensic Report (.pdf)
+              </button>
+              <button id="btn-nav-fwd-to-sweep" class="btn btn-primary btn-next-step" style="margin-top: 0;">
+                <span>📊</span> Proceed to Multi-Height Bimodal Sweep (Step 4) →
+              </button>
+            </div>
           </div>
         </div>
 
@@ -814,6 +830,84 @@
             </div>
           </div>
           <div class="panel-body">
+
+            <!-- 5-Phase Keyframe Posture Summary Bar (Step 3 Telemetry Alignment) -->
+            <div class="keyframe-filmstrip-container analysis-filmstrip-container" id="keyframe-filmstrip-analysis-container" style="margin-bottom: 1rem;">
+              <div class="filmstrip-header">
+                <div class="filmstrip-title">
+                  <span class="filmstrip-icon">🎞️</span>
+                  <strong>5-Phase Fall Kinematics &amp; Posture Keyframes</strong>
+                  <span class="filmstrip-subtitle">Synchronized kinematic milestones aligned with 1000 Hz time-series telemetry below</span>
+                </div>
+              </div>
+              <div class="keyframe-filmstrip" id="keyframe-filmstrip-analysis">
+                <!-- Keyframe 0: Launch -->
+                <div class="keyframe-card analysis-keyframe-card active-phase" data-keyframe-idx="0" data-analysis-kf-idx="0" tabindex="0" role="button" aria-label="Phase 1: Launch">
+                  <div class="keyframe-card-badge">Phase 1</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="kf-analysis-canvas-0" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Phase 1 · Launch</div>
+                    <div class="keyframe-card-time" id="kf-analysis-time-0">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-analysis-metric-0">v = 0.0 m/s · Alt = 0.00 m</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 1: Mid-Flight -->
+                <div class="keyframe-card analysis-keyframe-card" data-keyframe-idx="1" data-analysis-kf-idx="1" tabindex="0" role="button" aria-label="Phase 2: Mid-Flight">
+                  <div class="keyframe-card-badge">Phase 2</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="kf-analysis-canvas-1" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Phase 2 · Mid-Flight</div>
+                    <div class="keyframe-card-time" id="kf-analysis-time-1">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-analysis-metric-1">v = 0.0 m/s · Alt = 0.00 m</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 2: Touchdown -->
+                <div class="keyframe-card analysis-keyframe-card" data-keyframe-idx="2" data-analysis-kf-idx="2" tabindex="0" role="button" aria-label="Phase 3: Touchdown">
+                  <div class="keyframe-card-badge">Phase 3</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="kf-analysis-canvas-2" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Phase 3 · Touchdown</div>
+                    <div class="keyframe-card-time" id="kf-analysis-time-2">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-analysis-metric-2">v = 0.0 m/s · GRF = 0.0 kN</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 3: Peak GRF -->
+                <div class="keyframe-card analysis-keyframe-card" data-keyframe-idx="3" data-analysis-kf-idx="3" tabindex="0" role="button" aria-label="Phase 4: Peak GRF">
+                  <div class="keyframe-card-badge">Phase 4</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="kf-analysis-canvas-3" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Phase 4 · Peak GRF</div>
+                    <div class="keyframe-card-time" id="kf-analysis-time-3">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-analysis-metric-3">v = 0.0 m/s · GRF = 0.0 kN</div>
+                  </div>
+                </div>
+
+                <!-- Keyframe 4: Final Rest -->
+                <div class="keyframe-card analysis-keyframe-card" data-keyframe-idx="4" data-analysis-kf-idx="4" tabindex="0" role="button" aria-label="Phase 5: Final Rest">
+                  <div class="keyframe-card-badge">Phase 5</div>
+                  <div class="keyframe-canvas-wrapper">
+                    <canvas class="keyframe-mini-canvas" id="kf-analysis-canvas-4" width="160" height="100"></canvas>
+                  </div>
+                  <div class="keyframe-card-body">
+                    <div class="keyframe-card-title">Phase 5 · Final Rest</div>
+                    <div class="keyframe-card-time" id="kf-analysis-time-4">t = 0.000 s</div>
+                    <div class="keyframe-card-metrics" id="kf-analysis-metric-4">v = 0.0 m/s · Alt = 0.00 m</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="charts-dual-grid">
 
               <!-- Chart 1: GRF Normal & Tangential vs Time -->
