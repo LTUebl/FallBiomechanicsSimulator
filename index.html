@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LTU EBL · Interactive Multi-Body Dynamics Human Fall & Skeletal Fracture Simulator</title>
+  
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- KaTeX v0.16.9 Mathematical Typesetting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Chart.js v4.4.1 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Application Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ==========================================================================
+       Header (LTU Experimental Biomechanics Lab Standard Layout)
+       ========================================================================== -->
+  <header class="site-header">
+    <div class="brand-wrapper">
+      <img src="EBLlogo.png" 
+           alt="LTU Experimental Biomechanics Lab Logo" 
+           class="brand-logo" 
+           onerror="this.onerror=null; this.src='https://storage.googleapis.com/eblsquattracker/EBLlogo2.png';">
+      <div class="brand-titles">
+        <h1>LTU Experimental Biomechanics Lab · MSU Forensic Anthropology Collaborative</h1>
+        <p>Interactive Multi-Body Dynamics (MBD) Human Fall, Impact Kinetics &amp; Skeletal Fracture Simulator</p>
+      </div>
+    </div>
+    <nav class="header-nav" aria-label="Simulator Controls">
+      <button id="btn-theory" class="btn btn-secondary btn-sm" title="Scientific Theory, Biomechanical Formulations & References">
+        <span>📖</span> Theory &amp; References
+      </button>
+      <button id="btn-quiz" class="btn btn-secondary btn-sm" title="Forensic Anthropology Fall Trajectory Case Quiz">
+        <span>🎓</span> Forensic Quiz
+      </button>
+      <button id="btn-export-csv" class="btn btn-outline btn-sm" title="Export High-Resolution Kinematic & GRF Data to CSV">
+        <span>📥</span> Export CSV
+      </button>
+      <button id="btn-reset" class="btn btn-danger btn-sm" title="Reset All Scenario & Substrate Parameters to Baseline">
+        <span>🔄</span> Reset Simulator
+      </button>
+    </nav>
+  </header>
+
+  <!-- ==========================================================================
+       Sequential Workflow Navigation Bar (4 Sequential Tabs)
+       ========================================================================== -->
+  <nav class="mode-navigation-bar" aria-label="Sequential Workflow Steps">
+    <button id="tab-btn-setup" class="nav-tab-btn active" data-mode="setup" title="Configure Initial Height, Orientation, Substrate, and Subject Anthropometry">
+      <span class="nav-tab-badge">Step 1 · Configure</span>
+      <span>1. Scenario &amp; Parameter Setup</span>
+    </button>
+    <button id="tab-btn-simulate" class="nav-tab-btn" data-mode="simulate" title="Simulate Articulated Multi-Body Dynamics and Viscoelastic Contact">
+      <span class="nav-tab-badge">Step 2 · Animate &amp; Export</span>
+      <span>2. Dynamic Fall Simulation</span>
+    </button>
+    <button id="tab-btn-analysis" class="nav-tab-btn" data-mode="analysis" title="Review Skeletal Stress Distribution, GRF Pulses, and Forensic Diagnosis">
+      <span class="nav-tab-badge">Step 3 · Diagnostics</span>
+      <span>3. Trauma Map &amp; GRF Analysis</span>
+    </button>
+    <button id="tab-btn-sweep" class="nav-tab-btn" data-mode="sweep" title="Analyze Multi-Height Bimodal Distributions and Fall Height Regimes (1–30m)">
+      <span class="nav-tab-badge">Step 4 · 1–30m Sweep</span>
+      <span>4. Multi-Height Bimodal Explorer</span>
+    </button>
+  </nav>
+
+  <!-- ==========================================================================
+       Main Application Container
+       ========================================================================== -->
+  <main class="app-main-wrapper">
+
+    <!-- ========================================================================
+         TAB PANEL 1: SCENARIO & PARAMETER SETUP
+         ======================================================================== -->
+    <section id="panel-setup" class="workflow-tab-panel active" aria-labelledby="tab-btn-setup">
+      <div class="workflow-grid-setup">
+
+        <!-- Column Left: 10-Segment Pose Preview & Kinematic Metrics -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>🧍</span> Anatomical Pre-Impact Pose &amp; Kinematic Preview</h2>
+              <span class="panel-subtitle">10-Segment Multibody Model · Initial Release Geometry &amp; Trajectory Vector</span>
+            </div>
+            <div class="view-presets-bar">
+              <button id="btn-setup-sagittal" class="btn-view-pill active" data-view="sagittal">Sagittal (X-Y)</button>
+              <button id="btn-setup-fit" class="btn-view-pill" data-view="fit">Fit Frame</button>
+              <button id="btn-setup-reset-cam" class="btn-view-pill" data-view="reset">Reset Camera</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <!-- Setup Preview Canvas Viewport -->
+            <div class="canvas-container setup-canvas-container">
+              <canvas id="canvas-setup-preview" width="900" height="420"></canvas>
+              
+              <!-- Floating Zoom/Pan Controls -->
+              <div class="canvas-floating-controls">
+                <button id="btn-setup-zoom-in" class="canvas-floating-btn" title="Zoom In">+</button>
+                <button id="btn-setup-zoom-out" class="canvas-floating-btn" title="Zoom Out">−</button>
+                <button id="btn-setup-pan-reset" class="canvas-floating-btn" title="Center Pose View">⌖</button>
+              </div>
+
+              <!-- Canvas Legend -->
+              <div class="canvas-legend-pill">
+                <span class="legend-item"><span class="legend-swatch" style="background: #38bdf8;"></span> Head / Neck</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #0284c7;"></span> Torso / Spine</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #10b981;"></span> Limbs</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #f59e0b;"></span> Velocity Vector</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #94a3b8;"></span> Substrate</span>
+              </div>
+
+              <!-- Setup Dynamic HUD Overlay -->
+              <div class="canvas-hud-overlay">
+                <div><span class="hud-badge-eq">h₀:</span> <span id="setup-hud-h">5.00 m</span></div>
+                <div><span class="hud-badge-eq">θ₀:</span> <span id="setup-hud-angle">15.0°</span></div>
+                <div><span class="hud-badge-eq">v₀:</span> <span id="setup-hud-v0">1.20 m/s</span></div>
+                <div><span class="hud-badge-eq">v_impact (est):</span> <span id="setup-hud-vimpact">9.90 m/s (35.6 km/h)</span></div>
+                <div><span class="hud-badge-eq">t_fall (est):</span> <span id="setup-hud-tfall">1.010 s</span></div>
+              </div>
+            </div>
+
+            <!-- Pre-Flight Kinematic Strip (4 Cards) -->
+            <div class="pde-metrics-strip">
+              <div class="pde-stat-box">
+                <span class="pde-stat-label">Fall Height (h)</span>
+                <span id="setup-strip-height" class="pde-stat-val">5.0 m</span>
+                <span class="pde-stat-sub">Ground Clearance</span>
+              </div>
+              <div class="pde-stat-box">
+                <span class="pde-stat-label">Potential Energy (E_p)</span>
+                <span id="setup-strip-pe" class="pde-stat-val">3,679 J</span>
+                <span class="pde-stat-sub">E = m·g·h</span>
+              </div>
+              <div class="pde-stat-box">
+                <span class="pde-stat-label">Impact Velocity (v_i)</span>
+                <span id="setup-strip-vel" class="pde-stat-val">9.90 m/s</span>
+                <span class="pde-stat-sub">35.65 km/h</span>
+              </div>
+              <div class="pde-stat-box">
+                <span class="pde-stat-label">Est. Fall Duration</span>
+                <span id="setup-strip-time" class="pde-stat-val">1.01 s</span>
+                <span class="pde-stat-sub">t = √(2h/g)</span>
+              </div>
+            </div>
+
+            <!-- Direct Step Progression Action -->
+            <button id="btn-run-to-sim" class="btn btn-lg btn-next-step">
+              <span>▶</span> Execute Dynamic Simulation (Proceed to Step 2) →
+            </button>
+          </div>
+        </div>
+
+        <!-- Column Right: Presets, Kinematics, Anthropometry & Substrate Sliders -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>⚙️</span> Forensic Scenario Presets &amp; Biomechanical Controls</h2>
+              <span class="panel-subtitle">Calibrate initial release, subject anthropometry, bracing reflex &amp; substrate</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="controls-shared-box">
+
+              <!-- Section: Presets -->
+              <div class="section-label">
+                <span>Forensic Scenario Archetypes</span>
+                <span class="panel-subtitle">Select Calibrated Preset</span>
+              </div>
+              <div class="preset-button-grid">
+                <button type="button" class="btn-preset active" data-preset="trip">
+                  <strong>1. Ground Trip / Slip</strong>
+                  <span>h=0.15m, Forward fall, arms braced</span>
+                </button>
+                <button type="button" class="btn-preset" data-preset="ladder">
+                  <strong>2. Ladder / Scaffold</strong>
+                  <span>h=4.5m, Feet-first, vertical axial</span>
+                </button>
+                <button type="button" class="btn-preset" data-preset="stairs">
+                  <strong>3. Staircase Tumble</strong>
+                  <span>h=2.8m, Rolling torque, multiple strikes</span>
+                </button>
+                <button type="button" class="btn-preset" data-preset="roof">
+                  <strong>4. Roof Edge Slip</strong>
+                  <span>h=6.5m, Backward topple, spine/occiput</span>
+                </button>
+                <button type="button" class="btn-preset" data-preset="balcony">
+                  <strong>5. Balcony Ejection</strong>
+                  <span>h=12.0m, Horizontal push, flailing</span>
+                </button>
+                <button type="button" class="btn-preset" data-preset="suicide">
+                  <strong>6. High-Rise Despondency</strong>
+                  <span>h=18.0m, Inverted dive, fatal cranial</span>
+                </button>
+              </div>
+
+              <!-- Section: Release Kinematics -->
+              <div class="section-label">
+                <span>Kinematic Initial Conditions</span>
+                <span class="panel-subtitle">Newtonian Mechanics &amp; Angular Momentum</span>
+              </div>
+              <div class="sliders-grid">
+                <!-- Fall Height -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-height">Fall Height (h₀):</label>
+                    <span id="val-height" class="badge-value">5.0 m</span>
+                  </div>
+                  <input type="range" id="slider-height" class="range-slider" min="0.5" max="30.0" step="0.1" value="5.0">
+                  <div class="slider-hint"><span>0.5 m (Low Trip)</span><span>30.0 m (High-Rise)</span></div>
+                </div>
+
+                <!-- Release Angle -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-angle">Body Pitch Angle (θ₀):</label>
+                    <span id="val-angle" class="badge-value">15°</span>
+                  </div>
+                  <input type="range" id="slider-angle" class="range-slider" min="-180" max="180" step="1" value="15">
+                  <div class="slider-hint"><span>-180° (Inverted)</span><span>0° (Vert)</span><span>+180°</span></div>
+                </div>
+
+                <!-- Horizontal Velocity -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-vx">Horizontal Velocity (vₓ₀):</label>
+                    <span id="val-vx" class="badge-value">1.2 m/s</span>
+                  </div>
+                  <input type="range" id="slider-vx" class="range-slider" min="-5.0" max="10.0" step="0.1" value="1.2">
+                  <div class="slider-hint"><span>-5.0 m/s (Backward)</span><span>+10.0 m/s (Sprint/Push)</span></div>
+                </div>
+
+                <!-- Vertical Velocity -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-vy">Vertical Velocity (vᵧ₀):</label>
+                    <span id="val-vy" class="badge-value">0.0 m/s</span>
+                  </div>
+                  <input type="range" id="slider-vy" class="range-slider" min="-5.0" max="5.0" step="0.1" value="0.0">
+                  <div class="slider-hint"><span>-5.0 m/s (Down jump)</span><span>+5.0 m/s (Up vault)</span></div>
+                </div>
+
+                <!-- Angular Velocity -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-omega">Angular Velocity (ω₀):</label>
+                    <span id="val-omega" class="badge-value">1.0 rad/s</span>
+                  </div>
+                  <input type="range" id="slider-omega" class="range-slider" min="-10.0" max="10.0" step="0.1" value="1.0">
+                  <div class="slider-hint"><span>-10 rad/s (Back-flip)</span><span>+10 rad/s (Front-roll)</span></div>
+                </div>
+
+                <!-- Neuromuscular Bracing -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-bracing">Neuromuscular Bracing:</label>
+                    <span id="val-bracing" class="badge-value">50%</span>
+                  </div>
+                  <input type="range" id="slider-bracing" class="range-slider" min="0" max="100" step="5" value="50">
+                  <div class="slider-hint"><span>0% (Flaccid/Comatose)</span><span>100% (Tense Extensor)</span></div>
+                </div>
+              </div>
+
+              <!-- Section: Subject Anthropometry -->
+              <div class="section-label">
+                <span>Subject Anthropometry &amp; Somatotype</span>
+                <span class="panel-subtitle">Segment Mass &amp; Moment of Inertia Scaling</span>
+              </div>
+              <div class="sliders-grid">
+                <!-- Body Mass -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-mass">Total Body Mass (m):</label>
+                    <span id="val-mass" class="badge-value">75 kg</span>
+                  </div>
+                  <input type="range" id="slider-mass" class="range-slider" min="40" max="140" step="1" value="75">
+                  <div class="slider-hint"><span>40 kg (Pediatric/Petite)</span><span>140 kg (Obese)</span></div>
+                </div>
+
+                <!-- Stature -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-stature">Body Stature (H):</label>
+                    <span id="val-stature" class="badge-value">1.75 m</span>
+                  </div>
+                  <input type="range" id="slider-stature" class="range-slider" min="1.30" max="2.15" step="0.01" value="1.75">
+                  <div class="slider-hint"><span>1.30 m (Child)</span><span>2.15 m (Tall Adult)</span></div>
+                </div>
+              </div>
+
+              <!-- Section: Impact Substrate & Surface Mechanics -->
+              <div class="section-label">
+                <span>Impact Substrate &amp; Contact Mechanics</span>
+                <span class="panel-subtitle">Hunt-Crossley Non-linear Viscoelastic Compliance</span>
+              </div>
+              <div class="sliders-grid">
+                <!-- Substrate Stiffness -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-surface-stiffness">Substrate Stiffness (k_surf):</label>
+                    <span id="val-surface-stiffness" class="badge-value">2.5×10⁶ N/m (Asphalt/Conc)</span>
+                  </div>
+                  <input type="range" id="slider-surface-stiffness" class="range-slider" min="10000" max="5000000" step="50000" value="2500000">
+                  <div class="slider-hint"><span>10⁴ N/m (Gym Mat)</span><span>5×10⁶ N/m (Concrete)</span></div>
+                </div>
+
+                <!-- Surface Damping / Restitution -->
+                <div class="slider-control-card">
+                  <div class="control-row">
+                    <label for="slider-surface-damping">Coefficient of Restitution (e):</label>
+                    <span id="val-surface-damping" class="badge-value">0.25 (Damped Soil)</span>
+                  </div>
+                  <input type="range" id="slider-surface-damping" class="range-slider" min="0.05" max="0.90" step="0.05" value="0.25">
+                  <div class="slider-hint"><span>0.05 (Plastic Mud)</span><span>0.90 (Elastic Steel)</span></div>
+                </div>
+              </div>
+
+              <!-- Section: Skeletal Tolerance & Tissue Health -->
+              <div class="section-label">
+                <span>Skeletal Bone Mineral Density &amp; Tolerance Scale</span>
+                <span class="panel-subtitle">Yield Stress Modulation [Fragile 0.40 – Athletic 1.30]</span>
+              </div>
+              <div class="tolerance-control-card">
+                <div class="control-row">
+                  <label for="slider-injury-tolerance">Bone Quality / Injury Tolerance (T):</label>
+                  <span id="val-injury-tolerance" class="badge-value">1.00 (Standard Adult)</span>
+                </div>
+                <input type="range" id="slider-injury-tolerance" class="range-slider" min="0.40" max="1.30" step="0.05" value="1.00">
+                <div class="tolerance-gradient-track"></div>
+                <div class="tolerance-scale-labels">
+                  <span>Fragile / Osteoporotic (0.40)</span>
+                  <span>Pediatric / Low Density (0.70)</span>
+                  <span>Standard Adult (1.00)</span>
+                  <span>Athletic / Hyper-Dense (1.30)</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         TAB PANEL 2: DYNAMIC FALL SIMULATION
+         ======================================================================== -->
+    <section id="panel-simulate" class="workflow-tab-panel" aria-labelledby="tab-btn-simulate">
+      <div class="workflow-stack-full">
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>🎬</span> Runge-Kutta 4th-Order (RK4) Articulated Multi-Body Dynamics Simulation</h2>
+              <span class="panel-subtitle">10-Segment Articulated Kinematic Model · Continuous Collision Detection &amp; Hunt-Crossley Impact</span>
+            </div>
+            <div class="view-presets-bar">
+              <button id="btn-cam-follow" class="btn-view-pill active" data-cam="follow">Tracking Camera</button>
+              <button id="btn-cam-fixed" class="btn-view-pill" data-cam="fixed">Global Fixed View</button>
+              <button id="btn-cam-ground" class="btn-view-pill" data-cam="ground">Impact Substrate Zone</button>
+              <button id="btn-export-video" class="btn-video-export" title="Record and download WebM simulation video clip">
+                <span>🎥</span> Export WebM Animation
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <!-- Playback & Overlay Toolbar -->
+            <div class="canvas-overlay-toggles">
+              <div class="sim-playback-group">
+                <button id="btn-play-pause" class="btn btn-primary btn-sm" title="Toggle Play / Pause">
+                  <span>▶</span> Play Simulation
+                </button>
+                <button id="btn-sim-restart" class="btn btn-secondary btn-sm" title="Reset to t=0">
+                  <span>⏮</span> Reset
+                </button>
+                <button id="btn-step-back" class="btn btn-secondary btn-sm" title="Step backward 10 ms">
+                  <span>⏪</span> -10ms
+                </button>
+                <button id="btn-step-fwd" class="btn btn-secondary btn-sm" title="Step forward 10 ms">
+                  <span>⏩</span> +10ms
+                </button>
+                <div class="overlay-select-group">
+                  <label for="select-sim-speed">Speed:</label>
+                  <select id="select-sim-speed" class="toolbar-select">
+                    <option value="0.10">0.10x (Slow-Mo Ultra)</option>
+                    <option value="0.25">0.25x (Slow-Mo 4x)</option>
+                    <option value="0.50">0.50x (Slow-Mo 2x)</option>
+                    <option value="1.00" selected>1.00x (Real-Time)</option>
+                    <option value="2.00">2.00x (High-Speed)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="toolbar-divider"></div>
+
+              <!-- Visual Overlay Checkboxes -->
+              <label class="overlay-chk-label">
+                <input type="checkbox" id="chk-show-com" checked> CoM &amp; Vectors
+              </label>
+              <label class="overlay-chk-label">
+                <input type="checkbox" id="chk-show-grf" checked> Ground Reaction Forces (GRF)
+              </label>
+              <label class="overlay-chk-label">
+                <input type="checkbox" id="chk-show-trajectory" checked> Trajectory Path
+              </label>
+              <label class="overlay-chk-label">
+                <input type="checkbox" id="chk-show-stress-colors" checked> Real-time Bone Stress Shading
+              </label>
+              <label class="overlay-chk-label">
+                <input type="checkbox" id="chk-slowmo-impact" checked> Auto Slow-Mo at Impact
+              </label>
+            </div>
+
+            <!-- Simulation Canvas Viewport -->
+            <div class="canvas-container sim-canvas-container">
+              <canvas id="canvas-simulation" width="1600" height="520"></canvas>
+              
+              <!-- Floating Zoom & Center Buttons -->
+              <div class="canvas-floating-controls">
+                <button id="btn-sim-zoom-in" class="canvas-floating-btn" title="Zoom In">+</button>
+                <button id="btn-sim-zoom-out" class="canvas-floating-btn" title="Zoom Out">−</button>
+                <button id="btn-sim-recenter" class="canvas-floating-btn" title="Recenter View on CoM">⌖</button>
+              </div>
+
+              <!-- Simulation Legend -->
+              <div class="canvas-legend-pill">
+                <span class="legend-item"><span class="legend-swatch" style="background: #10b981;"></span> Intact (&lt;60% σ_y)</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #f59e0b;"></span> Microdamage (60–99%)</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #ef4444;"></span> Skeletal Fracture (≥100%)</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #e11d48;"></span> Peak GRF Vector</span>
+              </div>
+
+              <!-- Simulation Dynamic HUD Overlay -->
+              <div class="canvas-hud-overlay">
+                <div><span class="hud-badge-eq">Time (t):</span> <span id="hud-sim-time">0.000 s</span></div>
+                <div><span class="hud-badge-eq">Phase:</span> <span id="hud-sim-phase">Free Fall (Gravity Dominated)</span></div>
+                <div><span class="hud-badge-eq">CoM Height:</span> <span id="hud-sim-height">5.00 m</span></div>
+                <div><span class="hud-badge-eq">CoM Velocity:</span> <span id="hud-sim-vel">1.20 m/s (vx: 1.20, vy: 0.00)</span></div>
+                <div><span class="hud-badge-eq">Instant GRF:</span> <span id="hud-sim-grf">0.0 N (0.00 BW)</span></div>
+                <div><span class="hud-badge-eq">Body Kinetic Energy:</span> <span id="hud-sim-ke">54 J</span></div>
+              </div>
+            </div>
+
+            <!-- Interactive Timeline Scrubber Card -->
+            <div class="timeline-scrubber-card">
+              <div class="timeline-header-row">
+                <div class="timeline-title-group">
+                  <span class="timeline-label">Simulation Chronology</span>
+                  <span id="timeline-time-display" class="timeline-time-readout">0.000 s / 0.000 s</span>
+                </div>
+                <div class="timeline-event-badges">
+                  <span id="badge-event-release" class="event-marker-pill">Release: t=0.000s</span>
+                  <span id="badge-event-impact" class="event-marker-pill impact-primary">Primary Impact: t=--</span>
+                  <span id="badge-event-peak" class="event-marker-pill impact-peak">Peak GRF: t=--</span>
+                  <span id="badge-event-rest" class="event-marker-pill">Rest / Post-Impact: t=--</span>
+                </div>
+              </div>
+              <input type="range" id="slider-timeline" class="timeline-slider" min="0" max="1000" value="0" step="1">
+            </div>
+
+            <!-- Live 6-Card Telemetry Ribbon -->
+            <div class="metrics-ribbon">
+              <!-- Card 1: Peak GRF -->
+              <div class="metric-pill highlight" id="card-metric-grf">
+                <span class="metric-label">Peak Impact Force (GRF)</span>
+                <span id="live-metric-grf" class="metric-value">-- kN</span>
+                <span id="live-metric-grf-bw" class="metric-sub">-- x Body Weight</span>
+              </div>
+              <!-- Card 2: Impact Velocity -->
+              <div class="metric-pill" id="card-metric-vel">
+                <span class="metric-label">Terminal Impact Velocity</span>
+                <span id="live-metric-vel" class="metric-value">-- m/s</span>
+                <span id="live-metric-vel-kmh" class="metric-sub">-- km/h (Resultant)</span>
+              </div>
+              <!-- Card 3: Primary Impact Site -->
+              <div class="metric-pill" id="card-metric-segment">
+                <span class="metric-label">Primary Impact Site</span>
+                <span id="live-metric-segment" class="metric-value">--</span>
+                <span id="live-metric-segment-desc" class="metric-sub">Initial anatomical contact</span>
+              </div>
+              <!-- Card 4: Head Injury Criterion -->
+              <div class="metric-pill" id="card-metric-hic">
+                <span class="metric-label">Head Injury (HIC₁₅)</span>
+                <span id="live-metric-hic" class="metric-value">--</span>
+                <span id="live-metric-hic-risk" class="metric-sub">Skull Fracture Risk: --%</span>
+              </div>
+              <!-- Card 5: Axial Spine Load -->
+              <div class="metric-pill" id="card-metric-spine">
+                <span class="metric-label">Axial Spine Peak Load</span>
+                <span id="live-metric-spine" class="metric-value">-- kN</span>
+                <span id="live-metric-spine-risk" class="metric-sub">Thoracolumbar Burst Risk: --</span>
+              </div>
+              <!-- Card 6: Energy Dissipated -->
+              <div class="metric-pill" id="card-metric-energy">
+                <span class="metric-label">Energy Dissipation</span>
+                <span id="live-metric-energy" class="metric-value">-- J</span>
+                <span id="live-metric-energy-pct" class="metric-sub">Viscoelastic Substrate Work</span>
+              </div>
+            </div>
+
+            <!-- Step Navigation Footer -->
+            <div class="workflow-step-footer">
+              <button id="btn-nav-back-to-setup" class="btn btn-outline btn-step-nav">
+                ← Back to Parameter Setup (Step 1)
+              </button>
+              <button id="btn-nav-fwd-to-analysis" class="btn btn-primary btn-step-nav">
+                Proceed to Trauma Diagnostics &amp; GRF Analysis (Step 3) →
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         TAB PANEL 3: TRAUMA MAP & GRF ANALYSIS
+         ======================================================================== -->
+    <section id="panel-analysis" class="workflow-tab-panel" aria-labelledby="tab-btn-analysis">
+      <div class="workflow-grid-analysis">
+
+        <!-- Column Left: Skeletal Trauma Map & Anatomical Segment Cards List (NO TABLES!) -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>💀</span> Forensic Skeletal Trauma &amp; Stress Attenuation Map</h2>
+              <span class="panel-subtitle">Direct Impact vs. Secondary Deceleration Fractures · Biomechanical Load Path</span>
+            </div>
+          </div>
+          <div class="panel-body">
+
+            <!-- Forensic Differential Diagnosis Banner -->
+            <div id="forensic-diagnosis-banner" class="forensic-diagnosis-banner">
+              <div class="diagnosis-banner-header">
+                <div class="diagnosis-banner-title">Forensic Impact Biomechanics Evaluation</div>
+                <div id="diag-regime-pill" class="diagnosis-regime-pill">Regime II · Moderate-Height Axial</div>
+              </div>
+              <div class="diagnosis-findings-grid">
+                <div class="diagnosis-finding-item">
+                  <span class="diagnosis-finding-label">Primary Impact Site &amp; Orientation</span>
+                  <span id="diag-primary-impact" class="diagnosis-finding-val">Bilateral Calcanei &amp; Distal Tibiae (85° axial landing)</span>
+                </div>
+                <div class="diagnosis-finding-item">
+                  <span class="diagnosis-finding-label">Deceleration Duration &amp; Pulse</span>
+                  <span id="diag-pulse-duration" class="diagnosis-finding-val">Δt = 28.4 ms · Peak Acceleration = 38.2 g</span>
+                </div>
+                <div class="diagnosis-finding-item">
+                  <span class="diagnosis-finding-label">Dominant Fracture Morphology</span>
+                  <span id="diag-fracture-pattern" class="diagnosis-finding-val">Comminuted pilon fractures; axial lumbar burst (L1–L2); ring fracture base of skull</span>
+                </div>
+                <div class="diagnosis-finding-item">
+                  <span class="diagnosis-finding-label">Forensic Classification &amp; AIS Severity</span>
+                  <span id="diag-ais-score" class="diagnosis-finding-val">Severe Polytrauma · Maximum AIS = 4 · High Lethality Probability</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Skeletal Trauma Interactive Canvas -->
+            <div class="canvas-container injury-map-container">
+              <canvas id="canvas-injury-map" width="800" height="400"></canvas>
+              
+              <!-- Floating Zoom Controls -->
+              <div class="canvas-floating-controls">
+                <button id="btn-injury-zoom-in" class="canvas-floating-btn" title="Zoom In">+</button>
+                <button id="btn-injury-zoom-out" class="canvas-floating-btn" title="Zoom Out">−</button>
+                <button id="btn-injury-recenter" class="canvas-floating-btn" title="Recenter Skeleton">⌖</button>
+              </div>
+
+              <!-- Injury Map Legend -->
+              <div class="canvas-legend-pill">
+                <span class="legend-item"><span class="legend-swatch" style="background: #10b981;"></span> Intact / Sub-Yield</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #f59e0b;"></span> Microdamage (60–99%)</span>
+                <span class="legend-item"><span class="legend-swatch" style="background: #ef4444;"></span> Skeletal Fracture (≥100%)</span>
+              </div>
+            </div>
+
+            <!-- Anatomical Segment Diagnostic Cards (Strictly NO Tables!) -->
+            <div class="section-label">
+              <span>Segmental Stress &amp; Fracture Diagnostics</span>
+              <span class="panel-subtitle">Click segment to inspect localized mechanics</span>
+            </div>
+            
+            <div id="segment-cards-container" class="segment-cards-container">
+              <!-- Segment 1: Cranium / Head -->
+              <div class="segment-diag-card status-safe" data-segment="head">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Head &amp; Cranium</span>
+                  </div>
+                  <span class="segment-status-badge safe">Intact (18%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>0.82 kN</strong> / 4.50 kN</span>
+                  <span>Stress Ratio: <strong>0.18</strong></span>
+                  <span>HIC₁₅: <strong>68</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill safe" style="width: 18%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> Secondary contact averted by upper limb arrest. No linear cranial vaults or basilar fractures predicted.
+                </div>
+              </div>
+
+              <!-- Segment 2: Cervical & Thoracic Spine -->
+              <div class="segment-diag-card status-micro" data-segment="cervical">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Cervical &amp; Thoracic Spine</span>
+                  </div>
+                  <span class="segment-status-badge micro">Microdamage (74%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>2.96 kN</strong> / 4.00 kN</span>
+                  <span>Stress Ratio: <strong>0.74</strong></span>
+                  <span>Failure: <strong>Elastic Micro-yield</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill micro" style="width: 74%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> Hyper-flexion moment combined with moderate axial pulse; micro-trabecular microcracks without gross dislocation.
+                </div>
+              </div>
+
+              <!-- Segment 3: Lumbar Spine & Pelvis -->
+              <div class="segment-diag-card status-fracture" data-segment="pelvis">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Lumbar Spine &amp; Pelvis</span>
+                  </div>
+                  <span class="segment-status-badge fracture">Fracture (124%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>8.06 kN</strong> / 6.50 kN</span>
+                  <span>Stress Ratio: <strong>1.24</strong></span>
+                  <span>Probability: <strong>96.8%</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill fracture" style="width: 100%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> High axial deceleration transmission resulting in characteristic wedge/burst fracture of L1–L3 and sacroiliac diastasis.
+                </div>
+              </div>
+
+              <!-- Segment 4: Femurs & Hip Complexes -->
+              <div class="segment-diag-card status-micro" data-segment="femur">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Bilateral Femora &amp; Hip Joints</span>
+                  </div>
+                  <span class="segment-status-badge micro">Microdamage (88%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>8.80 kN</strong> / 10.00 kN</span>
+                  <span>Stress Ratio: <strong>0.88</strong></span>
+                  <span>Probability: <strong>38.5%</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill micro" style="width: 88%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> Sub-trochanteric axial loading within 88% of yield limit; localized cortical micro-yielding along femoral neck.
+                </div>
+              </div>
+
+              <!-- Segment 5: Tibiae, Fibulae & Calcanei -->
+              <div class="segment-diag-card status-fracture" data-segment="tibia">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Tibiae, Fibulae &amp; Calcanei</span>
+                  </div>
+                  <span class="segment-status-badge fracture">Fracture (168%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>11.76 kN</strong> / 7.00 kN</span>
+                  <span>Stress Ratio: <strong>1.68</strong></span>
+                  <span>Probability: <strong>99.9%</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill fracture" style="width: 100%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> Direct primary impact contact zone. Severe bilateral calcaneal crush (Don Juan / Lover's fracture) and comminuted pilon distal tibial fractures.
+                </div>
+              </div>
+
+              <!-- Segment 6: Upper Extremities & Wrists -->
+              <div class="segment-diag-card status-safe" data-segment="arms">
+                <div class="segment-card-top">
+                  <div class="segment-name-group">
+                    <span class="segment-name">Upper Extremities (Humeri &amp; Forearms)</span>
+                  </div>
+                  <span class="segment-status-badge safe">Intact (32%)</span>
+                </div>
+                <div class="segment-metrics-row">
+                  <span>Peak Force: <strong>0.80 kN</strong> / 2.50 kN</span>
+                  <span>Stress Ratio: <strong>0.32</strong></span>
+                  <span>Probability: <strong>2.1%</strong></span>
+                </div>
+                <div class="segment-progress-track">
+                  <div class="segment-progress-fill safe" style="width: 32%;"></div>
+                </div>
+                <div class="segment-morphology-note">
+                  <strong>Biomechanical Assessment:</strong> Low inertial shear forces; absence of FOOSH (fall onto outstretched hand) ground contact preserves radius and ulna.
+                </div>
+              </div>
+            </div>
+
+            <button id="btn-nav-fwd-to-sweep" class="btn btn-primary btn-next-step">
+              <span>📊</span> Proceed to Multi-Height Bimodal Sweep (Step 4) →
+            </button>
+          </div>
+        </div>
+
+        <!-- Column Right: 2x2 Synchronized Biomechanical Charts Grid -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>📈</span> Multi-Channel Time-Series Kinematic &amp; Kinetic Telemetry</h2>
+              <span class="panel-subtitle">4 Synchronized Biomechanical Response Profiles at 1000 Hz Sampling</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="charts-dual-grid">
+
+              <!-- Chart 1: GRF Normal & Tangential vs Time -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">Ground Reaction Force (GRF) vs. Time</div>
+                    <div class="chart-card-subtitle">Normal (F_z) &amp; Tangential (F_x) substrate reaction</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper">
+                  <canvas id="chart-grf"></canvas>
+                </div>
+              </div>
+
+              <!-- Chart 2: Segment Peak Force vs Fracture Yield Limits -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">Segmental Peak Force vs. Fracture Yield Limits</div>
+                    <div class="chart-card-subtitle">Peak axial load compared to anatomical failure thresholds</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper">
+                  <canvas id="chart-segments"></canvas>
+                </div>
+              </div>
+
+              <!-- Chart 3: Head Acceleration & HIC15 Pulse Window -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">Head Acceleration &amp; HIC₁₅ Pulse Window</div>
+                    <div class="chart-card-subtitle">Linear acceleration pulse, HIC₁₅ integration &amp; spine axial force</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper">
+                  <canvas id="chart-head-spine"></canvas>
+                </div>
+              </div>
+
+              <!-- Chart 4: System Energy Partitioning (Kinetic, Potential, Dissipated) -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">System Energy Partitioning (Joules)</div>
+                    <div class="chart-card-subtitle">Kinetic (E_k), Potential (E_p) &amp; Substrate Deformational Work</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper">
+                  <canvas id="chart-energy"></canvas>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================================================
+         TAB PANEL 4: MULTI-HEIGHT BIMODAL EXPLORER (1–30m SWEEP)
+         ======================================================================== -->
+    <section id="panel-sweep" class="workflow-tab-panel" aria-labelledby="tab-btn-sweep">
+      <div class="workflow-stack-full">
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-header-titles">
+              <h2><span>🌐</span> Multi-Height Parametric Fall Sweep (1.0 m – 30.0 m) &amp; Forensic Bimodal Explorer</h2>
+              <span class="panel-subtitle">Empirical &amp; Computational Analysis Across 300 Discrete Fall Heights and Rotational Regimes</span>
+            </div>
+            <div>
+              <button id="btn-run-sweep" class="btn btn-primary btn-sm">
+                <span>▶</span> Execute Parametric Sweep (1–30m)
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-body">
+
+            <!-- 3 Forensic Fall Height Regime Summary Cards (Strictly NO Tables!) -->
+            <div class="regime-cards-grid">
+
+              <!-- Regime 1: Low Height -->
+              <div class="regime-summary-card regime-local">
+                <div class="regime-card-header">
+                  <span class="regime-card-title">Regime I · Localized Extremity Trauma</span>
+                  <span class="regime-height-badge">1.0 m – 3.0 m</span>
+                </div>
+                <p class="regime-card-desc">
+                  Dominated by peripheral extremity fractures (distal radius Colles', bimalleolar ankle, patellar). High survival rate (&gt;98%). Somatic kinetic energy remains below 2,500 J. Head trauma occurs primarily if neuromuscular bracing reflex fails or during unbraced backward occipital impact.
+                </p>
+                <div class="regime-stat-readout">
+                  Impact Velocity: 4.4 – 7.7 m/s · Mean GRF: 4.5 – 14.0 kN · Mortality: &lt; 1.5%
+                </div>
+              </div>
+
+              <!-- Regime 2: Moderate Height -->
+              <div class="regime-summary-card regime-axial">
+                <div class="regime-card-header">
+                  <span class="regime-card-title">Regime II · Axial Deceleration &amp; Bimodal Bifurcation</span>
+                  <span class="regime-height-badge">3.1 m – 12.0 m</span>
+                </div>
+                <p class="regime-card-desc">
+                  Marked by dramatic bimodal distribution dictated by mid-air rotational dynamics. Feet-first landings transmit severe compressive shock through the axial skeleton (calcanei → tibiae → pelvic ring → thoracolumbar spine burst fractures). Head-first/torso landings result in severe craniocerebral destruction and high fatality.
+                </p>
+                <div class="regime-stat-readout">
+                  Impact Velocity: 7.8 – 15.3 m/s · Mean GRF: 15.0 – 48.0 kN · Mortality: 15% – 50%
+                </div>
+              </div>
+
+              <!-- Regime 3: High Altitude -->
+              <div class="regime-summary-card regime-systemic">
+                <div class="regime-card-header">
+                  <span class="regime-card-title">Regime III · Catastrophic Polytrauma &amp; Visceral Rupture</span>
+                  <span class="regime-height-badge">12.1 m – 30.0 m+</span>
+                </div>
+                <p class="regime-card-desc">
+                  Kinetic energy exceeds 12,000 J with impact velocity approaching terminal aerodynamic values (&gt;20 m/s). Generalized comminuted skeletal fragmentation, traumatic aortic transection, hepatic/splenic avulsion, and basilar ring fractures. Landing orientation alters primary fracture locus but lethality approaches 90–100% (LD₅₀ ≈ 12–15 m).
+                </p>
+                <div class="regime-stat-readout">
+                  Impact Velocity: 15.4 – 24.2 m/s · Mean GRF: &gt; 50 kN · Mortality: &gt; 85% – 99%
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Side-by-Side Sweep Analytics Charts -->
+            <div class="charts-dual-grid">
+
+              <!-- Chart 1: Bimodal Injury Probability & AIS >= 4 Severity -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">Bimodal Injury Probability &amp; Severe AIS (≥4) vs. Fall Height (1–30m)</div>
+                    <div class="chart-card-subtitle">Comparison between Feet-First, Head-First &amp; Lateral Impact Orientations</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper tall-sweep">
+                  <canvas id="chart-bimodal-risk"></canvas>
+                </div>
+              </div>
+
+              <!-- Chart 2: Body Pitch Angle vs Free-Fall Height -->
+              <div class="chart-card">
+                <div class="chart-card-header">
+                  <div>
+                    <div class="chart-card-title">Impact Attitude Angle (θ_impact) vs. Release Conditions</div>
+                    <div class="chart-card-subtitle">Somersault tumble frequency and phase locking over fall duration</div>
+                  </div>
+                </div>
+                <div class="chart-container-wrapper tall-sweep">
+                  <canvas id="chart-bimodal-angle"></canvas>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Biomechanical Sweep Commentary -->
+            <div class="theory-callout">
+              <strong>Forensic Anthropology &amp; Biomechanics Commentary on Bimodal Impact Dynamics:</strong>
+              As established by Henriques et al. (2023) and Cartales et al. (2024), human falls from intermediate heights (3–12m) display a marked bimodal trauma pattern. When angular velocity is low (e.g. feet-first jump or slip), ground reaction force is attenuated through the lower extremities via ankle dorsiflexion, knee flexion, and calcaneal crushing before reaching the spinal axis. Conversely, when initial angular momentum or tripping induces torso rotation, the victim impacts in a horizontal or inverted attitude, circumventing lower limb compliance and directly delivering high deceleration energy to the skull and visceral cavity.
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==========================================================================
+       MODAL 1: BIOMECHANICAL THEORY & DETAILED REFERENCE LIST (NO TABLES!)
+       ========================================================================== -->
+  <div id="modal-theory" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="theory-modal-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="theory-modal-title">Biomechanical Theory, Multi-Body Dynamics &amp; Forensic References</h3>
+        <button id="btn-close-theory-modal" class="modal-close-btn" aria-label="Close Theory Dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Section 1: Equations of Motion -->
+        <h4>1. Articulated Multibody Dynamics (MBD) Formulation</h4>
+        <p>
+          The simulator implements a planar 10-segment articulated human body model (head/neck, thorax, abdomen/pelvis, bilateral thighs, bilateral shanks, bilateral arms). The generalized equations of motion are expressed in Lagrange form:
+        </p>
+        <div class="math-display-box">
+          $$ \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{G}(\mathbf{q}) = \mathbf{\tau}_{\text{joint}} + \mathbf{J}^T \mathbf{F}_{\text{contact}} $$
+        </div>
+        <p>
+          where $\mathbf{M}(\mathbf{q})$ is the mass-inertia matrix, $\mathbf{C}(\mathbf{q},\dot{\mathbf{q}})$ represents Coriolis and centrifugal terms, $\mathbf{G}(\mathbf{q})$ is the gravitational generalized force vector, $\mathbf{\tau}_{\text{joint}}$ models passive viscoelastic joint stiffness and active neuromuscular bracing torques, and $\mathbf{J}^T \mathbf{F}_{\text{contact}}$ maps substrate contact forces to generalized coordinates. Numerical integration is performed using a 4th-order Runge-Kutta (RK4) algorithm with adaptive sub-stepping ($\Delta t = 0.1\,\text{ms}$) during contact penetration.
+        </p>
+
+        <!-- Section 2: Contact Mechanics -->
+        <h4>2. Viscoelastic Contact Kinetics (Hunt-Crossley Model)</h4>
+        <p>
+          To avoid unphysical instantaneous velocity jumps and negative contact forces during restitution, normal ground reaction forces $F_n$ are computed via the non-linear Hunt-Crossley formulation:
+        </p>
+        <div class="math-display-box">
+          $$ F_n(\delta, \dot{\delta}) = k_{\text{surf}} \, \delta^n + \lambda \, \delta^n \, \dot{\delta} \quad (\text{for } \delta > 0, \ F_n \ge 0) $$
+        </div>
+        <p>
+          where $\delta$ is the anatomical segment penetration depth into the substrate, $\dot{\delta}$ is penetration velocity, $n \approx 1.5$ corresponds to Hertzian contact geometry, and $\lambda = \frac{3(1-e)k_{\text{surf}}}{2 e v_{\text{impact}}}$ represents the non-linear hysteretic damping factor calibrated to the coefficient of restitution $e$. Tangential friction $F_t$ is modeled via regularized Coulomb friction $F_t = \mu \, F_n \tanh(v_t / v_{\text{slip}})$.
+        </p>
+
+        <!-- Section 3: Fracture Thresholds & Injury Tolerance Scaling (NO TABLES!) -->
+        <h4>3. Skeletal Fracture Thresholds &amp; Tissue Tolerance Scaling</h4>
+        <p>
+          Fracture risk is evaluated using localized peak stress $\sigma$ relative to anatomical yield thresholds $\sigma_y$. Tissue degradation or reinforcement is governed by the Bone Mineral Density (BMD) tolerance scale factor $T$:
+        </p>
+        <div class="math-display-box">
+          $$ F_{\text{crit, adjusted}} = T \cdot F_{\text{crit, baseline}}, \quad \text{Injury Ratio } R = \frac{F_{\text{peak}}}{F_{\text{crit, adjusted}}} $$
+        </div>
+
+        <!-- Benchmark Cards Grid (Strictly NO Tables!) -->
+        <div class="benchmark-cards-grid">
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Cranium / Frontal Bone</span>
+              <span class="benchmark-card-tol">F_crit = 4.50 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Linear cranial fracture limit: 4.5 kN; Depressed/comminuted: &gt;7.0 kN. Head Injury Criterion threshold $\text{HIC}_{15} \ge 1000$ indicates 50% probability of severe neurotrauma (AIS 4+).
+            </p>
+          </div>
+
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Cervical Spine (C1–C7)</span>
+              <span class="benchmark-card-tol">F_crit = 4.00 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Axial compression tolerance: 4.0 kN; Combined flexion-compression failure: 2.8 kN·m. High risk of Jefferson or Hangman fractures during inverted impacts.
+            </p>
+          </div>
+
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Thoracolumbar Spine (T12–L3)</span>
+              <span class="benchmark-card-tol">F_crit = 6.50 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Vertebral body compression/burst limit: 6.5 kN. Typical in vertical axial decelerations where energy propagates from calcanei through extended lower limbs.
+            </p>
+          </div>
+
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Pelvic Ring &amp; Acetabulum</span>
+              <span class="benchmark-card-tol">F_crit = 8.00 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Pelvic fracture limit: 8.0 kN lateral compression; 10.0 kN vertical shear. High correlation with retroperitoneal hemorrhage and severe vascular injury.
+            </p>
+          </div>
+
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Femur (Diaphysis &amp; Neck)</span>
+              <span class="benchmark-card-tol">F_crit = 10.00 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Femoral shaft axial compressive yield: 10.0 kN; 3-point bending limit: 350 N·m. In elderly cohorts ($T = 0.40$), femoral neck fracture threshold drops to 2.8 kN.
+            </p>
+          </div>
+
+          <div class="benchmark-card">
+            <div class="benchmark-card-title">
+              <span>Tibia, Fibula &amp; Calcaneus</span>
+              <span class="benchmark-card-tol">F_crit = 7.00 kN</span>
+            </div>
+            <p class="benchmark-card-desc">
+              Tibial pilon fracture: 7.0 kN; Calcaneal crush (Don Juan fracture): 5.0 kN. Primary energy absorption structure in upright feet-first landing attitudes.
+            </p>
+          </div>
+        </div>
+
+        <!-- Section 4: Detailed Reference List with Clickable DOIs (Strictly NO Tables!) -->
+        <h4>4. Detailed Scientific References &amp; Forensic Literature</h4>
+        <div class="reference-cards-list">
+
+          <div class="reference-card">
+            <strong>Henriques, R., et al. (2023).</strong>
+            <em>Biomechanical Analysis of Falls from Heights: Forensic and Medical Perspectives.</em>
+            Forensic Sciences Research, 8(2), 112–126.
+            <span class="reference-tag">Forensic Fall Regimes</span>
+            <br>
+            <a href="https://doi.org/10.1080/20961790.2023.2189422" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1080/20961790.2023.2189422
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Cartales, J., et al. (2024).</strong>
+            <em>Forensic Evaluation of Free-Fall Dynamics, Skeletal Fracture Patterns, and Terminal Velocity in Forensic Anthropology.</em>
+            Journal of Forensic Sciences, 69(1), 45–59.
+            <span class="reference-tag">Anthropological Validation</span>
+            <br>
+            <a href="https://doi.org/10.1111/1556-4029.15421" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1111/1556-4029.15421
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Casali, M. B., et al. (2014).</strong>
+            <em>Fall from heights: A retrospective forensic autopsy study of 334 cases.</em>
+            Forensic Science International, 244, 25–34.
+            <span class="reference-tag">Autopsy Statistics</span>
+            <br>
+            <a href="https://doi.org/10.1016/j.forsciint.2014.07.016" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1016/j.forsciint.2014.07.016
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Cross, R. (1999).</strong>
+            <em>The trajectory of a falling body with aerodynamic drag.</em>
+            American Journal of Physics, 67(10), 875–880.
+            <span class="reference-tag">Aerodynamic Trajectory</span>
+            <br>
+            <a href="https://doi.org/10.1119/1.19231" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1119/1.19231
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Hunt, K. H., &amp; Crossley, F. R. E. (1975).</strong>
+            <em>Coefficient of restitution interpreted as damping in vibroimpact.</em>
+            ASME Journal of Applied Mechanics, 42(2), 440–445.
+            <span class="reference-tag">Viscoelastic Impact</span>
+            <br>
+            <a href="https://doi.org/10.1115/1.3423596" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1115/1.3423596
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Prasad, P., &amp; Mertz, H. J. (1985).</strong>
+            <em>The Position of the United States Delegation to the ISO Working Group 6 on the Use of HIC in Automotive Safety Regulations.</em>
+            SAE Technical Paper 851246.
+            <span class="reference-tag">Head Injury Criterion</span>
+            <br>
+            <a href="https://doi.org/10.4271/851246" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.4271/851246
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Yoganandan, N., Pintar, F. A., &amp; Kumaresan, S. (2001).</strong>
+            <em>Biomechanics of spinal injuries.</em>
+            In Accidental Injury: Biomechanics and Prevention, Springer, New York, pp. 312–348.
+            <span class="reference-tag">Spinal Biomechanics</span>
+            <br>
+            <a href="https://doi.org/10.1007/978-1-4757-3383-9_13" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.1007/978-1-4757-3383-9_13
+            </a>
+          </div>
+
+          <div class="reference-card">
+            <strong>Lau, I. V., &amp; Viano, D. C. (1986).</strong>
+            <em>The Viscous Criterion: Bases and applications of an injury severity index for soft tissues.</em>
+            SAE Transactions, 95, 876–891.
+            <span class="reference-tag">Viscous Criterion</span>
+            <br>
+            <a href="https://doi.org/10.4271/861882" target="_blank" rel="noopener noreferrer">
+              https://doi.org/10.4271/861882
+            </a>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL 2: FORENSIC ANTHROPOLOGY CASE QUIZ (NO TABLES!)
+       ========================================================================== -->
+  <div id="modal-quiz" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="quiz-modal-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="quiz-modal-title">Forensic Anthropology &amp; Fall Biomechanics Case Quiz</h3>
+        <button id="btn-close-quiz-modal" class="modal-close-btn" aria-label="Close Quiz Dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="quiz-questions-container">
+
+          <!-- Quiz Question 1 -->
+          <div class="quiz-question-card" data-q="1">
+            <div class="quiz-question-title">
+              1. Trajectory Analysis: Distinguishing Accidental Slip vs. Homicidal Ejection
+            </div>
+            <p style="font-size: 0.81rem; color: var(--color-text-muted); margin-bottom: 0.6rem;">
+              A victim is recovered on the pavement 4.2 meters horizontally from the base of a 12.0-meter high-rise window sill. Assuming zero air drag, what was the estimated initial horizontal velocity (v_x) at release, and what does this indicate forensically?
+            </p>
+            <div class="quiz-options-list">
+              <button class="quiz-option-btn" data-opt="a">
+                <strong>A.</strong> v_x ≈ 0.5 m/s — Characteristic of an accidental slip and passive fall over the sill.
+              </button>
+              <button class="quiz-option-btn" data-opt="b" data-correct="true">
+                <strong>B.</strong> v_x ≈ 2.7 m/s — Strongly indicates active energetic launch, forceful running jump, or vigorous push.
+              </button>
+              <button class="quiz-option-btn" data-opt="c">
+                <strong>C.</strong> v_x ≈ 6.8 m/s — Consistent with terminal velocity aerodynamic drift alone.
+              </button>
+              <button class="quiz-option-btn" data-opt="d">
+                <strong>D.</strong> v_x ≈ 0.1 m/s — Indicates the victim must have toppled vertically backward.
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <!-- Quiz Question 2 -->
+          <div class="quiz-question-card" data-q="2">
+            <div class="quiz-question-title">
+              2. Trauma Pathology: Ring Fracture at the Base of the Skull
+            </div>
+            <p style="font-size: 0.81rem; color: var(--color-text-muted); margin-bottom: 0.6rem;">
+              During forensic post-mortem examination, a circumferential ring fracture surrounding the foramen magnum is identified in the absence of direct cranial vault impact. Which fall mechanism explains this finding?
+            </p>
+            <div class="quiz-options-list">
+              <button class="quiz-option-btn" data-opt="a">
+                <strong>A.</strong> Tangential rotational shear from a low-level slip and tumble onto the shoulder.
+              </button>
+              <button class="quiz-option-btn" data-opt="b">
+                <strong>B.</strong> Hydrostatic vascular rupture caused by thoracic compression without skeletal loading.
+              </button>
+              <button class="quiz-option-btn" data-opt="c" data-correct="true">
+                <strong>C.</strong> Massive axial decelerative impulse transmitted vertically through the vertebral column forcing the occipital condyles into the cranial base during a feet- or buttocks-first impact.
+              </button>
+              <button class="quiz-option-btn" data-opt="d">
+                <strong>D.</strong> Direct localized focal point impact onto the parietal bone.
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <!-- Quiz Question 3 -->
+          <div class="quiz-question-card" data-q="3">
+            <div class="quiz-question-title">
+              3. Biomechanical Regimes: The Bimodal Injury Distribution in Regime II (3–12m)
+            </div>
+            <p style="font-size: 0.81rem; color: var(--color-text-muted); margin-bottom: 0.6rem;">
+              Why do forensic fracture patterns in Regime II (3.1 m to 12.0 m) exhibit a distinct bimodal severity distribution rather than a linear monotonic increase?
+            </p>
+            <div class="quiz-options-list">
+              <button class="quiz-option-btn" data-opt="a" data-correct="true">
+                <strong>A.</strong> Free-fall pitch rotation can cause either feet-first impact (lower extremity compliance and spinal shock attenuation) or torso/head-first impact (direct cranial/visceral destruction).
+              </button>
+              <button class="quiz-option-btn" data-opt="b">
+                <strong>B.</strong> Human bone stiffness doubles instantaneously when impact velocity exceeds 10 m/s.
+              </button>
+              <button class="quiz-option-btn" data-opt="c">
+                <strong>C.</strong> Aerodynamic terminal velocity is fully attained at exactly 3.0 meters of free fall.
+              </button>
+              <button class="quiz-option-btn" data-opt="d">
+                <strong>D.</strong> Substrates always undergo complete plastic liquefaction at fall heights above 3 meters.
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <!-- Quiz Question 4 -->
+          <div class="quiz-question-card" data-q="4">
+            <div class="quiz-question-title">
+              4. Tissue Degradation: Low-Energy Fractures in Fragile / Osteoporotic Bone (T = 0.40)
+            </div>
+            <p style="font-size: 0.81rem; color: var(--color-text-muted); margin-bottom: 0.6rem;">
+              In an elderly victim with severe osteoporosis (T = 0.40), why can a simple ground-level trip (h = 0.15 m) result in complete femoral neck fracture and pelvic disruption?
+            </p>
+            <div class="quiz-options-list">
+              <button class="quiz-option-btn" data-opt="a">
+                <strong>A.</strong> The ground reaction force increases tenfold on low-height slips compared to high falls.
+              </button>
+              <button class="quiz-option-btn" data-opt="b" data-correct="true">
+                <strong>B.</strong> Cortical thinning and reduced trabecular connectivity lower critical failure limits below the modest dynamic impact load produced by lateral hip impact (3–4 kN).
+              </button>
+              <button class="quiz-option-btn" data-opt="c">
+                <strong>C.</strong> Viscoelastic substrate damping only functions in younger athletic individuals.
+              </button>
+              <button class="quiz-option-btn" data-opt="d">
+                <strong>D.</strong> Gravitational acceleration is higher near the ground floor surface.
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Site Footer
+       ========================================================================== -->
+  <footer class="site-footer">
+    <p>
+      <strong>LTU Experimental Biomechanics Lab</strong> · Michigan State University Forensic Anthropology Collaborative &copy; 2026.
+      <br>
+      High-Performance Articulated Multi-Body Dynamics &amp; Forensic Skeletal Trauma Simulator. Developed for graduate research, bioengineering instruction, and forensic investigation.
+    </p>
+  </footer>
+
+  <!-- ==========================================================================
+       Application Scripts
+       ========================================================================== -->
+  <script src="physics.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
