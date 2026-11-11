@@ -574,6 +574,83 @@
   // ==========================================================================
   // 6. 2000 Hz ARTICULATED BIOFIDELIC MULTI-BODY SOLVER (runSimulation)
   // ==========================================================================
+  const CONTACT_GROUPS = [
+    { id: 'foot', label: 'Foot', nodes: ['footTip', 'ankle'] },
+    { id: 'knee', label: 'Knee', nodes: ['knee'] },
+    { id: 'pelvis', label: 'Pelvis', nodes: ['hipPelvis'] },
+    { id: 'thorax', label: 'Thorax', nodes: ['midThorax', 'neckBase'] },
+    { id: 'head', label: 'Head', nodes: ['headCenter', 'headTop'] },
+    { id: 'elbow', label: 'Elbow', nodes: ['elbow'] },
+    { id: 'hand', label: 'Hand', nodes: ['wrist'] }
+  ];
+
+  /**
+   * Dynamically adjusts (q.shoulder, q.elbow) within biofidelic RoM limits
+   * to keep upper extremity nodes (wrist, elbow) on or above the ground surface
+   * while flexing the elbow and rotating the shoulder naturally as the trunk descends.
+   */
+  function adjustArmForGroundContact(neckBaseY, thoraxAngle, qCurrent, H, radii, contactTheta, dt) {
+    const L_ua = 0.186 * H;
+    const L_fa = 0.190 * H;
+    const r_e = radii.elbow;
+    const r_w = radii.wrist;
+
+    function calcArmY(qs, qe) {
+      const uaAngle = thoraxAngle + Math.PI - qs;
+      const ey = neckBaseY + L_ua * Math.cos(uaAngle);
+      const faAngle = uaAngle - qe;
+      const wy = ey + L_fa * Math.cos(faAngle);
+      return { ey, wy };
+    }
+
+    const cur = calcArmY(qCurrent.shoulder, qCurrent.elbow);
+    if (cur.ey >= r_e + 0.15 && cur.wy >= r_w + 0.15) {
+      return { shoulder: qCurrent.shoulder, elbow: qCurrent.elbow };
+    }
+
+    const isForward = contactTheta >= 0;
+    const targetQe = isForward ? (95 * Math.PI / 180) : (45 * Math.PI / 180);
+    const targetQs = isForward ? (90 * Math.PI / 180) : (-15 * Math.PI / 180);
+
+    let bestQs = qCurrent.shoulder;
+    let bestQe = qCurrent.elbow;
+    let minCost = Infinity;
+
+    const sMin = Math.max(ROM_LIMITS.shoulder.min, qCurrent.shoulder - 0.80);
+    const sMax = Math.min(ROM_LIMITS.shoulder.max, qCurrent.shoulder + 0.80);
+    const eMin = Math.max(ROM_LIMITS.elbow.min, qCurrent.elbow - 0.60);
+    const eMax = Math.min(ROM_LIMITS.elbow.max, qCurrent.elbow + 1.40);
+
+    const stepRad = 0.04;
+    for (let qe = eMin; qe <= eMax; qe += stepRad) {
+      for (let qs = sMin; qs <= sMax; qs += stepRad) {
+        const { ey, wy } = calcArmY(qs, qe);
+        const penE = Math.max(0, r_e - ey);
+        const penW = Math.max(0, r_w - wy);
+        const penCost = (penE + penW) * 10000;
+        const groundContact = Math.abs(wy - r_w) + Math.max(0, ey - r_e - 0.20);
+        const comfort = 1.2 * Math.pow(qs - targetQs, 2) + 2.0 * Math.pow(qe - targetQe, 2);
+        const continuity = 0.8 * Math.pow(qs - qCurrent.shoulder, 2) + 0.6 * Math.pow(qe - qCurrent.elbow, 2);
+
+        const cost = penCost + groundContact * 4.0 + comfort * 0.5 + continuity;
+        if (cost < minCost) {
+          minCost = cost;
+          bestQs = qs;
+          bestQe = qe;
+        }
+      }
+    }
+
+    const maxChange = 25.0 * dt;
+    const adjQs = qCurrent.shoulder + Math.max(-maxChange, Math.min(maxChange, bestQs - qCurrent.shoulder));
+    const adjQe = qCurrent.elbow + Math.max(-maxChange, Math.min(maxChange, bestQe - qCurrent.elbow));
+
+    return {
+      shoulder: Math.max(ROM_LIMITS.shoulder.min, Math.min(ROM_LIMITS.shoulder.max, adjQs)),
+      elbow: Math.max(ROM_LIMITS.elbow.min, Math.min(ROM_LIMITS.elbow.max, adjQe))
+    };
+  }
+
   const defaultParams = {
     height: 3.5,
     angleDeg: 35,
@@ -779,14 +856,15 @@
         fzTotal: 0,
         fxTotal: 0,
         headG: 1.0,
-        segInstantFI: segZeroFI
+        segInstantFI: segZeroFI,
+        contactPoints: []
       });
       curFlightT += flightFrameInterval;
     }
 
-    // 2000 Hz Sub-stepped Contact Phase (dt = 0.0005 s, duration 0.40 s)
+    // 2000 Hz Sub-stepped Contact Phase (dt = 0.0005 s, duration 0.65 s for complete rest)
     const dt = 0.0005;
-    const contactDuration = 0.40;
+    const contactDuration = 0.65;
     const numSteps = Math.round(contactDuration / dt);
 
     const peakLoads = {};
@@ -816,12 +894,99 @@
     let omega = omega0;
     const q = { ...q0 };
 
-    const yTouchdown = contactCoMY;
+    const canStayCrouched = (p.height <= 2.2 && Math.abs(contactTheta) < 0.30 && Math.abs(omega0) < 0.5 && B >= 0.35);
+    const nearestHoriz = Math.round((contactTheta - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+    const targetPelvisTheta = Math.abs(nearestHoriz) <= Math.PI
+      ? (Math.sign(nearestHoriz || 1) * (84 * Math.PI / 180))
+      : nearestHoriz;
+
+    let hipX = initialHipX;
+    let hipY = contactCoMY - comRelY0;
+    let hipVy = contactVy;
 
     for (let step = 0; step <= numSteps; step++) {
       const curTime = tContact + step * dt;
+      const tSinceContact = step * dt;
 
-      // 1. Forward Kinematics at current pose
+      // 1. Biofidelic Joint Flexion & Secondary Body Folding Targets
+      const qTargets = { ...q0 };
+      if (canStayCrouched) {
+        const kneeDeg = Math.min(95, 45 + 10 * Math.sqrt(p.height) + 15 * (1 - B));
+        qTargets.knee = kneeDeg * Math.PI / 180;
+        qTargets.ankle = 22 * Math.PI / 180;
+        const hipDeg = Math.min(85, 40 + 8 * Math.sqrt(p.height) + 10 * (1 - B));
+        qTargets.hip = hipDeg * Math.PI / 180;
+        const lumbarDeg = Math.min(55, 30 + 5 * Math.sqrt(p.height));
+        qTargets.lumbar = lumbarDeg * Math.PI / 180;
+        qTargets.neck = Math.min(30, 15 + 3 * Math.sqrt(p.height)) * Math.PI / 180;
+      } else {
+        // Gravitational collapse toward horizontal ground rest
+        if (tSinceContact < 0.04) {
+          if (contactTheta >= 25 * Math.PI / 180) {
+            qTargets.shoulder = Math.min(150 * Math.PI / 180, (85 + 35 * B) * Math.PI / 180);
+            qTargets.elbow = Math.min(135 * Math.PI / 180, (45 + 40 * (1 - B)) * Math.PI / 180);
+            qTargets.lumbar = 40 * Math.PI / 180;
+            qTargets.neck = 30 * Math.PI / 180;
+          } else if (contactTheta <= -25 * Math.PI / 180) {
+            qTargets.lumbar = -10 * Math.PI / 180;
+            qTargets.neck = -25 * Math.PI / 180;
+          }
+        } else {
+          if (contactTheta >= 0) {
+            // Prone
+            qTargets.lumbar = 0;
+            qTargets.neck = 0;
+            qTargets.hip = 0.04;
+            qTargets.knee = 15 * Math.PI / 180;
+            qTargets.ankle = -30 * Math.PI / 180;
+          } else {
+            // Supine
+            qTargets.lumbar = 0;
+            qTargets.neck = 0;
+            qTargets.hip = 0.04;
+            qTargets.knee = 10 * Math.PI / 180;
+            qTargets.ankle = 0;
+          }
+        }
+      }
+
+      // Drive core & leg joints toward targets
+      const flexRate = (step > 0) ? Math.min(25, 8 + 12 * (tSinceContact / 0.15)) : 6;
+      for (const j of ['lumbar', 'neck', 'hip', 'knee', 'ankle']) {
+        const target = qTargets[j] != null ? qTargets[j] : q0[j];
+        q[j] += (target - q[j]) * flexRate * dt;
+        q[j] = Math.max(ROM_LIMITS[j].min, Math.min(ROM_LIMITS[j].max, q[j]));
+      }
+
+      // Torso/pelvis rotation toward targetPelvisTheta
+      if (!canStayCrouched && tSinceContact > 0.04) {
+        const dTheta = targetPelvisTheta - pelvisTheta;
+        const rotAccel = Math.min(85, 35 + 16 * Math.sqrt(p.height));
+        const collapseAlpha = rotAccel * dTheta;
+        omega += collapseAlpha * dt;
+        omega *= Math.max(0, 1 - 18.0 * dt);
+      } else {
+        omega *= Math.max(0, 1 - 4.0 * dt);
+      }
+
+      // Velocity & omega decay in final 0.15s to guarantee 100% complete rest
+      const tRemain = contactDuration - tSinceContact;
+      if (tRemain <= 0.15) {
+        const decay = Math.min(1.0, Math.exp(-25.0 * dt));
+        omega *= decay;
+        comVx *= decay;
+        comVy *= decay;
+        hipVy *= decay;
+        if (tRemain <= 0.01) {
+          omega = 0;
+          comVx = 0;
+          comVy = 0;
+          hipVy = 0;
+        }
+      }
+      pelvisTheta += omega * dt;
+
+      // 2. Relative Forward Kinematics at current pose
       const pose = computePoseFromAngles(0, 0, pelvisTheta, q, anthro);
       let comRelX = 0, comRelY = 0;
       for (const k of Object.keys(nodeMasses)) {
@@ -831,19 +996,69 @@
       comRelX /= totalMass;
       comRelY /= totalMass;
 
-      let hipX = comX - comRelX;
-      let hipY = comY - comRelY;
+      // Core ground clearance constraint: calculate minimum hipY to prevent ground penetration
+      const activeCoreKeys = canStayCrouched
+        ? ['headTop', 'headCenter', 'neckBase', 'midThorax', 'hipPelvis', 'knee', 'ankle', 'footTip']
+        : ['headTop', 'headCenter', 'neckBase', 'midThorax', 'hipPelvis', 'knee', 'ankle'];
+      let minHipYForClearance = -Infinity;
+      for (const k of activeCoreKeys) {
+        const req = radii[k] - pose.nodes[k].y;
+        if (req > minHipYForClearance) minHipYForClearance = req;
+      }
 
-      // World node positions
+      // hipX tracks comX with relative offset
+      hipX += comVx * dt;
+
+      // hipY lowers smoothly under gravity toward minHipYForClearance
+      if (canStayCrouched) {
+        hipY = minHipYForClearance;
+        hipVy = 0;
+      } else {
+        if (hipY > minHipYForClearance + 0.001) {
+          hipVy -= g * dt;
+          hipY += hipVy * dt;
+          if (hipY <= minHipYForClearance) {
+            hipY = minHipYForClearance;
+            hipVy = 0;
+          }
+        } else {
+          hipY = minHipYForClearance;
+          hipVy = 0;
+        }
+      }
+
+      // 3. Dynamic Ground-Compliant Arm Inverse Kinematics / Articulation
+      const currentThoraxAngle = pelvisTheta + q.lumbar;
+      const currentNeckBaseY = hipY + pose.nodes.neckBase.y;
+      const armAdj = adjustArmForGroundContact(currentNeckBaseY, currentThoraxAngle, q, H, radii, contactTheta, dt);
+      q.shoulder = armAdj.shoulder;
+      q.elbow = armAdj.elbow;
+
+      // Recompute pose with updated arm angles
+      const fullPose = computePoseFromAngles(0, 0, pelvisTheta, q, anthro);
+
+      // World node positions (clamped to ground surface)
       const curNodes = {};
-      for (const k of Object.keys(pose.nodes)) {
+      for (const k of Object.keys(fullPose.nodes)) {
         curNodes[k] = {
-          x: hipX + pose.nodes[k].x,
-          y: hipY + pose.nodes[k].y
+          x: hipX + fullPose.nodes[k].x,
+          y: Math.max(radii[k], hipY + fullPose.nodes[k].y)
         };
       }
 
-      // 2. Lowest node clearance and ground penetration
+      // 4. Center of Mass: compute directly as TRUE mass-weighted Center of Mass of curNodes!
+      let trueComX = 0, trueComY = 0;
+      for (const k of Object.keys(curNodes)) {
+        trueComX += nodeMasses[k] * curNodes[k].x;
+        trueComY += nodeMasses[k] * curNodes[k].y;
+      }
+      trueComX /= totalMass;
+      trueComY /= totalMass;
+
+      comX = trueComX;
+      comY = trueComY;
+
+      // 5. Ground Contact Forces (GRF)
       const nodeDepths = {};
       let minNodeBot = Infinity;
       let deepestKey = null;
@@ -855,7 +1070,7 @@
           minNodeBot = bot;
           deepestKey = k;
         }
-        const depth = Math.max(0, -bot);
+        const depth = Math.max(0, 0.025 - bot);
         nodeDepths[k] = depth;
         if (depth > maxNodeDepth) maxNodeDepth = depth;
       }
@@ -871,88 +1086,125 @@
         contactFt[k] = 0;
       }
 
-      const tSinceContact = step * dt;
-      const isContact = (maxNodeDepth > 0 || minNodeBot <= 0 || step > 0);
+      const isExtremity = ['footTip', 'ankle', 'knee', 'wrist', 'elbow'].includes(deepestKey);
+      const kBody = isExtremity ? (28 + 18 * B) * (p.mass / 75) : 95 * (p.mass / 75);
+      const kEff = (kSurf * kBody) / (kSurf + kBody);
 
-      if (isContact) {
-        // Effective series contact compliance:
-        // Combine surface stiffness (kSurf) with body soft-tissue & joint flexion compliance (kBody)
-        const isExtremity = ['footTip', 'ankle', 'knee', 'wrist', 'elbow'].includes(deepestKey);
-        const kBody = isExtremity ? (28 + 18 * B) * (p.mass / 75) : 95 * (p.mass / 75);
-        const kEff = (kSurf * kBody) / (kSurf + kBody); // kN/m
+      // Static Body-Weight Support Force (smooth transition to 1.0 BW)
+      const weightSupportN = totalMass * g * (1 - Math.exp(-tSinceContact / 0.012));
 
-        // 1. Static Body-Weight Support Force (ramps smoothly to 1.00 * BW over initial contact)
-        const weightSupportN = totalMass * g * (1 - Math.exp(-tSinceContact / 0.012));
+      // Primary Dynamic Deceleration Pulse
+      const vDown = Math.max(0, -comVy);
+      const tauRise = Math.max(0.006, Math.min(0.035, 0.22 / Math.sqrt(kEff)));
+      const riseEnv = Math.pow(tSinceContact / tauRise, 1.25) * Math.exp(1.25 * (1 - tSinceContact / tauRise));
+      const vImpactAbs = Math.abs(contactVy);
+      const peakDynN = (kEff * 1000 * 0.018 * Math.pow(vImpactAbs, 1.18) + 210 * Math.pow(vImpactAbs, 1.25)) * (totalMass / 75) * 0.78;
+      dynamicPulseN = peakDynN * riseEnv * Math.pow(vDown / Math.max(0.5, vImpactAbs), 0.35);
 
-        // 2. Primary Dynamic Deceleration Pulse
-        const vDown = Math.max(0, -comVy);
-        // Smooth rise envelope over initial compression (tau_rise depends on surface & joint stiffness)
-        const tauRise = Math.max(0.006, Math.min(0.035, 0.22 / Math.sqrt(kEff)));
-        const riseEnv = Math.pow(tSinceContact / tauRise, 1.25) * Math.exp(1.25 * (1 - tSinceContact / tauRise));
-        // Calibrate peak dynamic force magnitude to match biomechanical impact velocity and kEff
-        const vImpactAbs = Math.abs(contactVy);
-        const peakDynN = (kEff * 1000 * 0.018 * Math.pow(vImpactAbs, 1.18) + 210 * Math.pow(vImpactAbs, 1.25)) * (totalMass / 75) * 0.78;
-        dynamicPulseN = peakDynN * riseEnv * Math.pow(vDown / Math.max(0.5, vImpactAbs), 0.35);
+      // Secondary Segment Impact Pulse
+      const hasSecondary = (p.height >= 3.0 && Math.abs(contactTheta) > 0.20 && Math.abs(omega0) > 0.30) || (p.height >= 12.0);
+      if (hasSecondary) {
+        const tSecOffset = Math.max(0.045, Math.min(0.14, 0.11 / Math.max(0.5, Math.abs(omega0) + 0.8)));
+        const secPeakN = peakDynN * (0.35 + 0.15 * Math.min(1.0, Math.abs(omega0) / 1.5));
+        secPulseN = secPeakN * Math.exp(-0.5 * Math.pow((tSinceContact - tSecOffset) / 0.014, 2));
+      }
 
-        // 3. Secondary Segment Impact Pulse (tumbling/pitching or high fall secondary wave)
-        const hasSecondary = (p.height >= 3.0 && Math.abs(contactTheta) > 0.20 && Math.abs(omega0) > 0.30) || (p.height >= 12.0);
-        if (hasSecondary) {
-          const tSecOffset = Math.max(0.045, Math.min(0.14, 0.11 / Math.max(0.5, Math.abs(omega0) + 0.8)));
-          const secPeakN = peakDynN * (0.35 + 0.15 * Math.min(1.0, Math.abs(omega0) / 1.5));
-          secPulseN = secPeakN * Math.exp(-0.5 * Math.pow((tSinceContact - tSecOffset) / 0.014, 2));
-        }
+      stepFzTotal = Math.max(0, weightSupportN + dynamicPulseN + secPulseN);
 
-        stepFzTotal = Math.max(0, weightSupportN + dynamicPulseN + secPulseN);
+      // Horizontal friction
+      if (Math.abs(comVx) > 1e-4 && stepFzTotal > 0) {
+        const maxFxSlip = muSurf * stepFzTotal;
+        const maxFxStop = Math.abs(comVx) * totalMass / dt * 0.25;
+        stepFxTotal = -Math.sign(comVx) * Math.min(maxFxSlip, maxFxStop);
+      } else {
+        stepFxTotal = 0;
+      }
 
-        // Distribute vertical Ground Reaction Force among contacting nodes
-        let sumW = 0;
-        for (const k of Object.keys(curNodes)) {
-          if (nodeDepths[k] > 0) {
-            sumW += Math.pow(nodeDepths[k], 1.1) * radii[k];
+      // Integrate horizontal CoM velocity
+      comVx += (stepFxTotal / totalMass) * dt;
+
+      // Distribute GRF into contactPoints and contactFn
+      const contactPoints = [];
+      let sumWeight = 0;
+      const groupData = [];
+
+      for (const gDef of CONTACT_GROUPS) {
+        let gWeight = 0;
+        let gSumX = 0;
+        let contactingNodesCount = 0;
+        for (const nk of gDef.nodes) {
+          const bot = curNodes[nk].y - radii[nk];
+          if (bot <= 0.025) {
+            const depth = Math.max(0.001, 0.025 - bot);
+            const w = nodeMasses[nk] * Math.pow(depth, 1.1);
+            gWeight += w;
+            gSumX += w * curNodes[nk].x;
+            contactingNodesCount++;
           }
         }
-        if (sumW > 0) {
-          for (const k of Object.keys(curNodes)) {
-            if (nodeDepths[k] > 0) {
-              const w = Math.pow(nodeDepths[k], 1.1) * radii[k];
-              contactFn[k] = stepFzTotal * (w / sumW);
-            }
-          }
-        } else if (deepestKey) {
-          contactFn[deepestKey] = stepFzTotal;
-        }
-
-        // Horizontal Friction (Fx): strictly opposes comVx, decays toward 0, NEVER increases or reverses
-        if (Math.abs(comVx) > 1e-4 && stepFzTotal > 0) {
-          const maxFxSlip = muSurf * stepFzTotal;
-          const maxFxStop = Math.abs(comVx) * totalMass / dt * 0.25;
-          stepFxTotal = -Math.sign(comVx) * Math.min(maxFxSlip, maxFxStop);
-        } else {
-          stepFxTotal = 0;
-        }
-
-        for (const k of Object.keys(curNodes)) {
-          if (stepFzTotal > 0) {
-            contactFt[k] = stepFxTotal * (contactFn[k] / stepFzTotal);
-          } else {
-            contactFt[k] = 0;
-          }
+        if (contactingNodesCount > 0 && gWeight > 0) {
+          groupData.push({
+            id: gDef.id,
+            label: gDef.label,
+            weight: gWeight,
+            x: gSumX / gWeight
+          });
+          sumWeight += gWeight;
         }
       }
 
-      // Non-tunneling ground limit: shift (hipX, hipY) so lowest contacting node never sinks below -0.01 m
-      if (minNodeBot < -0.01) {
-        const shiftY = -0.01 - minNodeBot;
-        hipY += shiftY;
-        for (const k of Object.keys(curNodes)) {
-          curNodes[k].y += shiftY;
+      if (sumWeight > 0 && stepFzTotal > 0) {
+        for (const gd of groupData) {
+          const fzFrac = gd.weight / sumWeight;
+          const fzKN = (stepFzTotal * fzFrac) / 1000;
+          const fxKN = (stepFxTotal * fzFrac) / 1000;
+          if (fzKN >= 0.01) {
+            contactPoints.push({
+              id: gd.id,
+              label: gd.label,
+              x: Number(gd.x.toFixed(4)),
+              y: 0,
+              fzKN: Number(fzKN.toFixed(2)),
+              fxKN: Number(fxKN.toFixed(2))
+            });
+          }
         }
+      } else if (deepestKey && stepFzTotal > 0) {
+        const gMatch = CONTACT_GROUPS.find(g => g.nodes.includes(deepestKey)) || CONTACT_GROUPS[0];
+        contactPoints.push({
+          id: gMatch.id,
+          label: gMatch.label,
+          x: Number(curNodes[deepestKey].x.toFixed(4)),
+          y: 0,
+          fzKN: Number((stepFzTotal / 1000).toFixed(2)),
+          fxKN: Number((stepFxTotal / 1000).toFixed(2))
+        });
+      }
+
+      // Distribute contactFn to individual nodes for segment load calculations
+      let sumNodeW = 0;
+      for (const k of Object.keys(curNodes)) {
+        if (nodeDepths[k] > 0) {
+          sumNodeW += Math.pow(nodeDepths[k], 1.1) * radii[k];
+        }
+      }
+      if (sumNodeW > 0) {
+        for (const k of Object.keys(curNodes)) {
+          if (nodeDepths[k] > 0) {
+            const w = Math.pow(nodeDepths[k], 1.1) * radii[k];
+            contactFn[k] = stepFzTotal * (w / sumNodeW);
+            contactFt[k] = stepFxTotal * (w / sumNodeW);
+          }
+        }
+      } else if (deepestKey) {
+        contactFn[deepestKey] = stepFzTotal;
+        contactFt[deepestKey] = stepFxTotal;
       }
 
       const currentFzKN = stepFzTotal / 1000;
       if (currentFzKN > peakGRF) peakGRF = currentFzKN;
 
-      // 3. Direct segment contact forces (kN)
+      // 6. Direct segment contact forces (kN)
       const directContactSeg = {
         head: (contactFn.headTop + contactFn.headCenter) / 1000,
         neck: (contactFn.neckBase * 0.4) / 1000,
@@ -971,17 +1223,15 @@
         if (f > 0.35 && firstContactTime[segId] === null) firstContactTime[segId] = curTime;
       }
 
-      // 4. Dynamic axial wave conduction along skeletal chain
+      // Dynamic axial wave conduction along skeletal chain
       const footAxial = directContactSeg.foot;
       const shankAxial = footAxial * 0.88 + directContactSeg.shank;
       const thighAxial = shankAxial * 0.80 + directContactSeg.thigh + (directContactSeg.lumbarPelvis > 1.0 ? directContactSeg.lumbarPelvis * 0.55 : 0);
 
-      // Thoracolumbar T12-L1 & Pelvis:
       const bodyDecel = stepFzTotal / totalMass;
       const upperBodyMass = nodeMasses.headTop + nodeMasses.headCenter + nodeMasses.neckBase + nodeMasses.midThorax;
       const upperInertialLoadKN = (upperBodyMass * bodyDecel) / 1000;
       const lumbarPelvisAxial = Math.max(directContactSeg.lumbarPelvis, thighAxial * 0.68 + upperInertialLoadKN * 0.70);
-
       const thoraxAxial = Math.max(directContactSeg.thorax, upperInertialLoadKN * 0.40);
       const neckAxial = (nodeMasses.headCenter + nodeMasses.headTop) * bodyDecel / 1000;
       const headAxial = directContactSeg.head + neckAxial * 0.40;
@@ -1007,7 +1257,7 @@
         }
       }
 
-      // Head resultant acceleration (in g): smooth dynamic impact acceleration + 1.0 g static gravity
+      // Head resultant acceleration (in g)
       const dynamicGRF = dynamicPulseN + secPulseN;
       const dynRatio = stepFzTotal > 0 ? (dynamicGRF / stepFzTotal) : 0;
       const headDynFn = (contactFn.headTop + contactFn.headCenter) * dynRatio;
@@ -1023,72 +1273,7 @@
       const headAccG = 1.0 + fHeadDynNet / (headM * g);
       headAccGList.push(headAccG);
 
-      // 5. Biofidelic Joint Flexion & Secondary Body Folding
-      const qTargets = { ...q0 };
-
-      if (Math.abs(contactTheta) < 50 * Math.PI / 180) {
-        // Upright / feet-first landing:
-        // Knee flexes (45-95 deg), ankle dorsiflexes (+22 deg), hip flexes (40-85 deg), spine flexes
-        const kneeDeg = Math.min(95, 45 + 10 * Math.sqrt(p.height) + 15 * (1 - B));
-        qTargets.knee = kneeDeg * Math.PI / 180;
-        qTargets.ankle = 22 * Math.PI / 180;
-        const hipDeg = Math.min(85, 40 + 8 * Math.sqrt(p.height) + 10 * (1 - B));
-        qTargets.hip = hipDeg * Math.PI / 180;
-        const lumbarDeg = Math.min(55, 30 + 5 * Math.sqrt(p.height));
-        qTargets.lumbar = lumbarDeg * Math.PI / 180;
-        qTargets.neck = Math.min(30, 15 + 3 * Math.sqrt(p.height)) * Math.PI / 180;
-      } else if (contactTheta >= 25 * Math.PI / 180) {
-        // Forward-pitched landing: arms flex at elbow/shoulder absorbing FOOSH, torso/head rotate down
-        qTargets.shoulder = Math.min(150 * Math.PI / 180, (85 + 35 * B) * Math.PI / 180);
-        qTargets.elbow = Math.min(135 * Math.PI / 180, (45 + 40 * (1 - B)) * Math.PI / 180);
-        qTargets.lumbar = 40 * Math.PI / 180;
-        qTargets.neck = 30 * Math.PI / 180;
-      } else if (contactTheta <= -25 * Math.PI / 180) {
-        // Backward/supine landing: pelvis/back strikes first followed by rapid neck/head whip
-        qTargets.lumbar = -10 * Math.PI / 180;
-        qTargets.neck = -25 * Math.PI / 180;
-      }
-
-      // Drive joint angles smoothly toward target RoM postures
-      const flexRate = (stepFzTotal > 50) ? Math.min(30, 10 + 15 * (stepFzTotal / (totalMass * g))) : 4;
-      for (const j of Object.keys(ROM_LIMITS)) {
-        const target = qTargets[j] != null ? qTargets[j] : q0[j];
-        q[j] += (target - q[j]) * flexRate * dt;
-        q[j] = Math.max(ROM_LIMITS[j].min, Math.min(ROM_LIMITS[j].max, q[j]));
-      }
-
-      // Torso/pelvis rotation under contact moments
-      if (stepFzTotal > 0) {
-        let netTorque = 0;
-        for (const k of Object.keys(curNodes)) {
-          if (contactFn[k] > 0 || contactFt[k] !== 0) {
-            const rx = curNodes[k].x - comX;
-            const ry = curNodes[k].y - comY;
-            netTorque += (rx * contactFn[k] - ry * contactFt[k]);
-          }
-        }
-        const I_body = totalMass * Math.pow(0.28 * H, 2);
-        const alphaRot = netTorque / I_body;
-        omega += alphaRot * dt;
-        omega *= Math.max(0, 1 - (10 + 20 * (stepFzTotal / (totalMass * g))) * dt);
-      } else {
-        omega *= Math.max(0, 1 - 0.5 * dt);
-      }
-      pelvisTheta += omega * dt;
-
-      // 6. Integrate CoM position & velocity
-      const comAy = -g + stepFzTotal / totalMass;
-      const comAx = stepFxTotal / totalMass;
-      comVy += comAy * dt;
-      comVx += comAx * dt;
-
-      // Inelastic human postural settling: no upward bounce
-      if (comVy > 0) comVy = 0;
-
-      comY += comVy * dt;
-      comX += comVx * dt;
-
-      // Compute smooth nodal velocities without numerical projection noise
+      // Compute frame nodes
       const frameNodes = {};
       for (const k of Object.keys(curNodes)) {
         const rx = curNodes[k].x - comX;
@@ -1137,7 +1322,8 @@
           fzTotal: Number(currentFzKN.toFixed(2)),
           fxTotal: Number((stepFxTotal / 1000).toFixed(2)),
           headG: Number(headAccG.toFixed(1)),
-          segInstantFI
+          segInstantFI,
+          contactPoints
         });
       }
     }

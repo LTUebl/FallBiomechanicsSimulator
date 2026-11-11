@@ -890,7 +890,7 @@
       const curT = i * dtStep;
       const curX = p.vx * curT;
       const curY = fallH + p.vy * curT - 0.5 * g * curT * curT;
-      const sp = toScreen(curX, Math.max(0, curY));
+      const sp = toScreen(curX, Math.max(0.05, curY));
       if (i === 0) ctx.moveTo(sp.sx, sp.sy);
       else ctx.lineTo(sp.sx, sp.sy);
     }
@@ -1142,7 +1142,7 @@
       ctx.beginPath();
       for (let i = 0; i <= frameIdx; i++) {
         const f = frames[i];
-        const sp = toScreen(f.comX, f.comY);
+        const sp = toScreen(f.comX, Math.max(0.05, f.comY));
         if (i === 0) ctx.moveTo(sp.sx, sp.sy);
         else ctx.lineTo(sp.sx, sp.sy);
       }
@@ -1246,41 +1246,73 @@
       ctx.fill();
     });
 
-    // 6. Ground Reaction Force Vector Arrow
-    if (dom.chkShowGrf && dom.chkShowGrf.checked && curFrame.fzTotal > 0.1) {
-      // Find lowest contacting node
-      let minY = Infinity;
-      let contactX = curFrame.comX;
-      Object.keys(nds).forEach(k => {
-        if (nds[k].y < minY) {
-          minY = nds[k].y;
-          contactX = nds[k].x;
+    // 6. Ground Reaction Force Vector Arrows (Single or Distributed Multi-Segment)
+    if (dom.chkShowGrf && dom.chkShowGrf.checked && curFrame.fzTotal > 0.05) {
+      if (curFrame.contactPoints && curFrame.contactPoints.length > 0) {
+        for (const cp of curFrame.contactPoints) {
+          if (cp.fzKN < 0.05) continue;
+          const spContact = toScreen(cp.x, 0);
+          const grfArrowLen = Math.min(120, Math.max(18, cp.fzKN * 3.5));
+          const tiltDx = (cp.fxKN / Math.max(0.1, cp.fzKN)) * grfArrowLen * 0.25;
+
+          ctx.strokeStyle = '#e11d48';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(spContact.sx, spContact.sy);
+          ctx.lineTo(spContact.sx + tiltDx, spContact.sy - grfArrowLen);
+          ctx.stroke();
+
+          // Arrow head
+          ctx.fillStyle = '#e11d48';
+          ctx.beginPath();
+          const tipX = spContact.sx + tiltDx;
+          const tipY = spContact.sy - grfArrowLen;
+          ctx.moveTo(tipX, tipY);
+          ctx.lineTo(tipX - 6, tipY + 10);
+          ctx.lineTo(tipX + 6, tipY + 10);
+          ctx.closePath();
+          ctx.fill();
+
+          // Text Badge
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px "JetBrains Mono", monospace';
+          ctx.fillText(`${cp.fzKN.toFixed(1)} kN`, tipX + 5, tipY + 8);
         }
-      });
+      } else {
+        // Fallback lowest-node arrow
+        let minY = Infinity;
+        let contactX = curFrame.comX;
+        Object.keys(nds).forEach(k => {
+          if (nds[k].y < minY) {
+            minY = nds[k].y;
+            contactX = nds[k].x;
+          }
+        });
 
-      const spContact = toScreen(contactX, Math.max(0, minY));
-      const grfArrowLen = Math.min(120, curFrame.fzTotal * 2.5);
+        const spContact = toScreen(contactX, Math.max(0, minY));
+        const grfArrowLen = Math.min(120, curFrame.fzTotal * 2.5);
 
-      ctx.strokeStyle = '#e11d48';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(spContact.sx, spContact.sy);
-      ctx.lineTo(spContact.sx, spContact.sy - grfArrowLen);
-      ctx.stroke();
+        ctx.strokeStyle = '#e11d48';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(spContact.sx, spContact.sy);
+        ctx.lineTo(spContact.sx, spContact.sy - grfArrowLen);
+        ctx.stroke();
 
-      // Arrow head
-      ctx.fillStyle = '#e11d48';
-      ctx.beginPath();
-      ctx.moveTo(spContact.sx, spContact.sy - grfArrowLen);
-      ctx.lineTo(spContact.sx - 6, spContact.sy - grfArrowLen + 10);
-      ctx.lineTo(spContact.sx + 6, spContact.sy - grfArrowLen + 10);
-      ctx.closePath();
-      ctx.fill();
+        // Arrow head
+        ctx.fillStyle = '#e11d48';
+        ctx.beginPath();
+        ctx.moveTo(spContact.sx, spContact.sy - grfArrowLen);
+        ctx.lineTo(spContact.sx - 6, spContact.sy - grfArrowLen + 10);
+        ctx.lineTo(spContact.sx + 6, spContact.sy - grfArrowLen + 10);
+        ctx.closePath();
+        ctx.fill();
 
-      // Text Badge
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 11px "JetBrains Mono", monospace';
-      ctx.fillText(`${curFrame.fzTotal.toFixed(1)} kN`, spContact.sx + 8, spContact.sy - grfArrowLen + 10);
+        // Text Badge
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillText(`${curFrame.fzTotal.toFixed(1)} kN`, spContact.sx + 8, spContact.sy - grfArrowLen + 10);
+      }
     }
 
     // 7. Center of Mass & Velocity Vector
@@ -1767,33 +1799,59 @@
       ctx.fill();
     });
 
-    // GRF Vector Arrow
-    if (curFrame.fzTotal > 0.1) {
-      let minYContact = Infinity;
-      let contactX = curFrame.comX;
-      nodeKeys.forEach(k => {
-        if (nds[k].y < minYContact) {
-          minYContact = nds[k].y;
-          contactX = nds[k].x;
+    // GRF Vector Arrows (Single or Distributed Multi-Segment)
+    if (curFrame.fzTotal > 0.05) {
+      if (curFrame.contactPoints && curFrame.contactPoints.length > 0) {
+        for (const cp of curFrame.contactPoints) {
+          if (cp.fzKN < 0.05) continue;
+          const spContact = toMiniScreen(cp.x, 0);
+          const arrowLen = Math.min(36, Math.max(12, cp.fzKN * 1.5));
+          const tiltDx = (cp.fxKN / Math.max(0.1, cp.fzKN)) * arrowLen * 0.2;
+
+          ctx.strokeStyle = '#e11d48';
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(spContact.sx, spContact.sy);
+          ctx.lineTo(spContact.sx + tiltDx, spContact.sy - arrowLen);
+          ctx.stroke();
+
+          ctx.fillStyle = '#e11d48';
+          ctx.beginPath();
+          const tipX = spContact.sx + tiltDx;
+          const tipY = spContact.sy - arrowLen;
+          ctx.moveTo(tipX, tipY);
+          ctx.lineTo(tipX - 4, tipY + 6);
+          ctx.lineTo(tipX + 4, tipY + 6);
+          ctx.closePath();
+          ctx.fill();
         }
-      });
-      const spContact = toMiniScreen(contactX, Math.max(0, minYContact));
-      const arrowLen = Math.min(36, Math.max(14, curFrame.fzTotal * 1.2));
+      } else {
+        let minYContact = Infinity;
+        let contactX = curFrame.comX;
+        nodeKeys.forEach(k => {
+          if (nds[k].y < minYContact) {
+            minYContact = nds[k].y;
+            contactX = nds[k].x;
+          }
+        });
+        const spContact = toMiniScreen(contactX, Math.max(0, minYContact));
+        const arrowLen = Math.min(36, Math.max(14, curFrame.fzTotal * 1.2));
 
-      ctx.strokeStyle = '#e11d48';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(spContact.sx, spContact.sy);
-      ctx.lineTo(spContact.sx, spContact.sy - arrowLen);
-      ctx.stroke();
+        ctx.strokeStyle = '#e11d48';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(spContact.sx, spContact.sy);
+        ctx.lineTo(spContact.sx, spContact.sy - arrowLen);
+        ctx.stroke();
 
-      ctx.fillStyle = '#e11d48';
-      ctx.beginPath();
-      ctx.moveTo(spContact.sx, spContact.sy - arrowLen);
-      ctx.lineTo(spContact.sx - 4, spContact.sy - arrowLen + 6);
-      ctx.lineTo(spContact.sx + 4, spContact.sy - arrowLen + 6);
-      ctx.closePath();
-      ctx.fill();
+        ctx.fillStyle = '#e11d48';
+        ctx.beginPath();
+        ctx.moveTo(spContact.sx, spContact.sy - arrowLen);
+        ctx.lineTo(spContact.sx - 4, spContact.sy - arrowLen + 6);
+        ctx.lineTo(spContact.sx + 4, spContact.sy - arrowLen + 6);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
 
     // CoM Dot & Velocity Vector
